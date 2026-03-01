@@ -13,7 +13,7 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 
-import config
+from . import config
 
 log = logging.getLogger(__name__)
 

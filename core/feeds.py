@@ -3,12 +3,12 @@
 import re
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import feedparser
 import requests
 
-import config
+from . import config
 
 log = logging.getLogger(__name__)
 
@@ -90,14 +90,20 @@ def fetch_newsapi() -> list[dict]:
 
 
 def fetch_all() -> list[dict]:
-    """Fetch from all sources, deduplicate, return sorted newest-first."""
+    """Fetch from all sources, deduplicate, filter stale, return sorted newest-first."""
     articles = fetch_rss() + fetch_newsapi()
 
-    # Deduplicate by normalized title fingerprint
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=config.MAX_ARTICLE_AGE_HOURS)
+
+    # Deduplicate by normalized title fingerprint and drop articles older than MAX_ARTICLE_AGE_HOURS
     seen: set[str] = set()
     unique = []
+    stale = 0
     for a in articles:
         if not a["title"]:
+            continue
+        if a["published_at"] < cutoff:
+            stale += 1
             continue
         key = _normalize_title(a["title"])
         fp = hashlib.md5(key.encode()).hexdigest()
@@ -106,5 +112,5 @@ def fetch_all() -> list[dict]:
             unique.append(a)
 
     unique.sort(key=lambda x: x["published_at"], reverse=True)
-    log.info("Fetched %d unique articles from %d total", len(unique), len(articles))
+    log.info("Fetched %d unique articles from %d total (%d stale discarded)", len(unique), len(articles), stale)
     return unique

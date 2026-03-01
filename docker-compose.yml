@@ -1,0 +1,26 @@
+services:
+
+  monitor:
+    build: .
+    command: python -m core.monitor
+    volumes:
+      - sentinel-data:/data
+    environment:
+      - SENTINEL_DB_PATH=/data/news_events.db
+      - SENTINEL_LOG_PATH=/data/financial_news.log
+    restart: unless-stopped
+
+  api:
+    build: .
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - sentinel-data:/data
+    environment:
+      - SENTINEL_DB_PATH=/data/news_events.db
+      - SENTINEL_LOG_PATH=/data/financial_news.log
+    restart: unless-stopped
+
+volumes:
+  sentinel-data:

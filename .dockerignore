@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+frontend/node_modules/
+frontend/dist/
+news_events.db
+financial_news.log
+*.md

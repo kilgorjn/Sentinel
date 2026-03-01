@@ -11,12 +11,12 @@ import sys
 import time
 from datetime import datetime, timezone
 
-import config
-import feeds
-import classifier
-import spike_detector
-import storage
-import alerts
+from . import config
+from . import feeds
+from . import classifier
+from . import spike_detector
+from . import storage
+from . import alerts
 
 logging.basicConfig(
     level=logging.INFO,

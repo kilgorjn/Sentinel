@@ -11,7 +11,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 import logging
 
-import config
+from . import config
 
 log = logging.getLogger(__name__)
 
