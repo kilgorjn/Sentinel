@@ -1,32 +1,58 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
-import SurgeAlert  from './components/SurgeAlert.vue'
-import SummaryBar  from './components/SummaryBar.vue'
-import EventFeed   from './components/EventFeed.vue'
+import { ref, provide, onMounted, onUnmounted } from 'vue'
+import SurgeAlert       from './components/SurgeAlert.vue'
+import SummaryBar       from './components/SummaryBar.vue'
+import NarrativeSummary from './components/NarrativeSummary.vue'
+import EventFeed        from './components/EventFeed.vue'
 
-const events  = ref([])
-const summary = ref({ counts: [], total: 0 })
-const surge   = ref({ surge_active: false, high_count_in_window: 0, window_minutes: 30 })
+const events      = ref([])
+const summary     = ref({ counts: [], total: 0 })
+const surge       = ref({ surge_active: false, high_count_in_window: 0, window_minutes: 30 })
+const narrative   = ref({ text: '', generated_at: null, surge_active: false })
+const timeseries  = ref({ labels: [], high: [], medium: [], low: [] })
 const lastRefresh = ref(null)
+const activeFilter = ref(null)  // null = show all
+
+const timezone = ref('America/New_York')
+provide('timezone', timezone)
+
+function setFilter(cls) {
+  activeFilter.value = activeFilter.value === cls ? null : cls  // click again to clear
+  refresh()
+}
 
 async function refresh() {
   try {
-    const [evRes, sumRes, surRes] = await Promise.all([
-      fetch('/api/events?limit=50'),
+    const cls = activeFilter.value
+    const evUrl = cls ? `/api/events?limit=50&classification=${cls}` : '/api/events?limit=50'
+    const [evRes, sumRes, surRes, narRes, tsRes] = await Promise.all([
+      fetch(evUrl),
       fetch('/api/events/summary'),
       fetch('/api/surge'),
+      fetch('/api/events/narrative'),
+      fetch('/api/events/timeseries'),
     ])
-    events.value  = await evRes.json()
-    summary.value = await sumRes.json()
-    surge.value   = await surRes.json()
-    lastRefresh.value = new Date().toLocaleTimeString()
+    events.value     = await evRes.json()
+    summary.value    = await sumRes.json()
+    surge.value      = await surRes.json()
+    narrative.value  = await narRes.json()
+    timeseries.value = await tsRes.json()
+    lastRefresh.value = new Date().toLocaleTimeString('en-US', { timeZone: timezone.value, hour: '2-digit', minute: '2-digit' }) + ' ET'
   } catch (e) {
     console.error('Refresh failed:', e)
   }
 }
 
 let timer
-onMounted(() => { refresh(); timer = setInterval(refresh, 30_000) })
+onMounted(async () => {
+  const cfgRes = await fetch('/api/config').catch(() => null)
+  if (cfgRes?.ok) {
+    const cfg = await cfgRes.json()
+    timezone.value = cfg.display_timezone
+  }
+  refresh()
+  timer = setInterval(refresh, 30_000)
+})
 onUnmounted(() => clearInterval(timer))
 </script>
 
@@ -36,7 +62,8 @@ onUnmounted(() => clearInterval(timer))
       last updated {{ lastRefresh }}
     </span>
   </h1>
-  <SurgeAlert :surge="surge" />
-  <SummaryBar :summary="summary" />
-  <EventFeed  :events="events" />
+  <SurgeAlert        :surge="surge" />
+  <SummaryBar        :summary="summary" :active-filter="activeFilter" :timeseries="timeseries" @filter="setFilter" />
+  <NarrativeSummary  :narrative="narrative" />
+  <EventFeed         :events="events" :active-filter="activeFilter" />
 </template>

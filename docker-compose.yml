@@ -8,6 +8,7 @@ services:
     environment:
       - SENTINEL_DB_PATH=/data/news_events.db
       - SENTINEL_LOG_PATH=/data/financial_news.log
+      - NEWSAPI_KEY=${NEWSAPI_KEY}
     restart: unless-stopped
 
   api:

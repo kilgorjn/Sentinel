@@ -33,6 +33,11 @@ CREATE TABLE IF NOT EXISTS news_events (
 
 CREATE INDEX IF NOT EXISTS idx_classification ON news_events(classification);
 CREATE INDEX IF NOT EXISTS idx_created_at     ON news_events(created_at);
+
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 # Keep one connection open for the process lifetime
@@ -94,6 +99,29 @@ def save_event(article: dict, result: dict) -> None:
             fh.write(json.dumps(log_entry) + "\n")
     except Exception as e:
         log.error("Log file write failed: %s", e)
+
+
+def get_meta(key: str) -> str | None:
+    """Return a value from the meta table, or None if not set."""
+    try:
+        row = _get_conn().execute(
+            "SELECT value FROM meta WHERE key = ?", (key,)
+        ).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def set_meta(key: str, value: str) -> None:
+    """Upsert a value into the meta table."""
+    try:
+        conn = _get_conn()
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value)
+        )
+        conn.commit()
+    except Exception as e:
+        log.error("Meta write failed: %s", e)
 
 
 def already_seen(title: str) -> bool:

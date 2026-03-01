@@ -106,3 +106,42 @@ def classify(article: dict) -> dict:
     except Exception as e:
         log.error("Ollama error for '%s': %s", article.get("title"), e)
         return {"classification": "LOW", "confidence": 0.0, "reason": f"Error: {e}"}
+
+
+_SUMMARY_PROMPT = """\
+You are a financial news analyst at a large brokerage firm.
+
+Recent classified news events (last 24 hours):
+{events}
+
+{surge_context}Write 3-4 sentences covering:
+- The main financial themes driving market attention right now
+- Why brokerage customers are likely logging in to check their accounts
+- Any key risk factors or catalysts to watch
+
+Rules: Output ONLY the summary sentences. No preamble, no intro phrase, no labels. Start directly with the first sentence of analysis.
+SUMMARY:"""
+
+
+def summarize(events: list[dict], surge_active: bool = False) -> str:
+    """Generate a plain-English narrative summary of recent events via Ollama."""
+    if not events:
+        return "No significant financial events in the last 24 hours."
+    lines = []
+    for i, ev in enumerate(events[:25], 1):
+        lines.append(f"{i}. [{ev['classification']}] {ev['title']} — {ev.get('reason', '')}")
+    surge_context = (
+        "IMPORTANT: A NEWS SURGE is currently active. Focus your summary on explaining "
+        "the specific causes of the surge and what is driving elevated brokerage activity.\n\n"
+        if surge_active else ""
+    )
+    prompt = _SUMMARY_PROMPT.format(events="\n".join(lines), surge_context=surge_context)
+    try:
+        raw = _call_ollama(prompt)
+        text = raw.strip()
+        if "SUMMARY:" in text:
+            text = text.split("SUMMARY:", 1)[-1].strip()
+        return text
+    except Exception as e:
+        log.warning("Narrative summarization failed: %s", e)
+        return "Summary unavailable — Ollama did not respond."

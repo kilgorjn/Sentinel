@@ -40,3 +40,21 @@ class HealthResponse(BaseModel):
     ollama_reachable: bool
     ollama_url: str
     model: str
+
+
+class NarrativeResponse(BaseModel):
+    text: str
+    generated_at: str
+    cached: bool
+    surge_active: bool
+
+
+class ConfigResponse(BaseModel):
+    display_timezone: str
+
+
+class TimeseriesResponse(BaseModel):
+    labels: list[str]           # ISO hour bucket strings
+    high: list[int]
+    medium: list[int]
+    low: list[int]

@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from core import config
 from api.models import (
     NewsEvent, SummaryResponse, ClassificationCount,
-    SurgeResponse, HealthResponse,
+    SurgeResponse, HealthResponse, NarrativeResponse, ConfigResponse, TimeseriesResponse,
 )
 from api.dependencies import get_db
 
@@ -105,6 +105,107 @@ def get_health():
         ollama_url=config.OLLAMA_URL,
         model=config.OLLAMA_MODEL,
     )
+
+
+@router.get("/events/timeseries", response_model=TimeseriesResponse)
+def get_timeseries(hours: int = Query(24, ge=1, le=168)):
+    """Hourly event counts per classification for the last N hours."""
+    conn = get_db()
+
+    # Build a complete list of hour buckets (UTC, with Z suffix so the browser parses them correctly)
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    buckets = [(now - timedelta(hours=i)).strftime("%Y-%m-%dT%H:00:00Z") for i in range(hours - 1, -1, -1)]
+
+    rows = conn.execute(
+        """
+        SELECT strftime('%Y-%m-%dT%H:00:00', created_at) AS bucket,
+               classification,
+               COUNT(*) AS cnt
+        FROM news_events
+        WHERE created_at >= datetime('now', ? || ' hours')
+        GROUP BY bucket, classification
+        ORDER BY bucket ASC
+        """,
+        (f"-{hours}",),
+    ).fetchall()
+
+    # Index results by (bucket, classification); SQL returns without Z so we add it for matching
+    data: dict[tuple[str, str], int] = {}
+    for row in rows:
+        data[(row[0] + "Z", row[1])] = row[2]
+
+    high   = [data.get((b, "HIGH"),   0) for b in buckets]
+    medium = [data.get((b, "MEDIUM"), 0) for b in buckets]
+    low    = [data.get((b, "LOW"),    0) for b in buckets]
+
+    return TimeseriesResponse(labels=buckets, high=high, medium=medium, low=low)
+
+
+@router.get("/config", response_model=ConfigResponse)
+def get_config():
+    """Frontend display settings derived from server config."""
+    return ConfigResponse(display_timezone=config.DISPLAY_TIMEZONE)
+
+
+NARRATIVE_TTL_SECONDS = 900  # Regenerate at most every 15 minutes
+
+
+@router.get("/events/narrative", response_model=NarrativeResponse)
+def get_narrative():
+    """AI-generated narrative summary of recent events, with surge-aware context."""
+    from core import classifier, storage as cs
+    conn = get_db()
+
+    # Current 24h event count and surge state (mirrors /surge logic)
+    count_row = conn.execute(
+        "SELECT COUNT(*) FROM news_events WHERE created_at >= datetime('now', '-24 hours')"
+    ).fetchone()
+    current_count = str(count_row[0]) if count_row else "0"
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=config.SPIKE_WINDOW_MINUTES)).isoformat()
+    surge_row = conn.execute(
+        "SELECT COUNT(*) FROM news_events WHERE classification = 'HIGH' AND created_at >= ?",
+        (cutoff,),
+    ).fetchone()
+    surge_active = (surge_row[0] if surge_row else 0) >= config.SPIKE_HIGH_THRESHOLD
+
+    # Check cache — skip Ollama if nothing has changed and cache is fresh
+    cached_text  = cs.get_meta("narrative_text")
+    cached_at    = cs.get_meta("narrative_generated_at")
+    cached_count = cs.get_meta("narrative_event_count")
+    cached_surge = cs.get_meta("narrative_surge_state")
+
+    age_ok = False
+    if cached_at:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(cached_at)).total_seconds()
+        age_ok = age < NARRATIVE_TTL_SECONDS
+
+    if (cached_text and age_ok
+            and cached_count == current_count
+            and cached_surge == str(surge_active)):
+        return NarrativeResponse(
+            text=cached_text, generated_at=cached_at, cached=True, surge_active=surge_active
+        )
+
+    # Fetch events for summarization — HIGH first, then MEDIUM, cap at 25
+    rows = conn.execute(
+        """SELECT title, classification, reason FROM news_events
+           WHERE created_at >= datetime('now', '-24 hours')
+           ORDER BY CASE classification WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END,
+                    created_at DESC
+           LIMIT 25"""
+    ).fetchall()
+    events = [{"title": r[0], "classification": r[1], "reason": r[2]} for r in rows]
+
+    text = classifier.summarize(events, surge_active=surge_active)
+    now_str = datetime.now(timezone.utc).isoformat()
+
+    cs.set_meta("narrative_text", text)
+    cs.set_meta("narrative_generated_at", now_str)
+    cs.set_meta("narrative_event_count", current_count)
+    cs.set_meta("narrative_surge_state", str(surge_active))
+
+    return NarrativeResponse(text=text, generated_at=now_str, cached=False, surge_active=surge_active)
 
 
 app.include_router(router)

@@ -19,8 +19,10 @@ RSS_FEEDS = [
 ]
 
 # NewsAPI (optional — set to None to disable)
-NEWSAPI_KEY = None        # e.g. "abc123..."
+NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", None)
 NEWSAPI_QUERY = "Federal Reserve OR earnings OR jobs report OR market crash OR CPI"
+NEWSAPI_DAILY_LIMIT = 95          # Hard ceiling (free tier = 100; 5 held in reserve)
+NEWSAPI_MIN_INTERVAL_SECONDS = 900 # At least 15 min between calls (~96/day max)
 
 # Classification thresholds
 # Score needed for each tier (used internally; Ollama outputs HIGH/MEDIUM/LOW directly)
@@ -35,6 +37,9 @@ SPIKE_HIGH_THRESHOLD = 3      # Number of HIGH events in window → SURGE alert
 POLL_INTERVAL_SECONDS = 300   # Check every 5 minutes
 MARKET_HOURS_ONLY = False     # Set to True to restrict polling to 9:00–17:00 ET Mon–Fri
 MAX_ARTICLE_AGE_HOURS = 24    # Discard articles older than this
+
+# Display timezone — used by the frontend for all timestamps
+DISPLAY_TIMEZONE = os.getenv("DISPLAY_TIMEZONE", "America/New_York")
 
 # Storage — overridable via env vars (used by Docker to point at a named volume)
 DB_PATH  = os.getenv("SENTINEL_DB_PATH",  str(_ROOT / "news_events.db"))

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import feedparser
 import requests
 
-from . import config
+from . import config, storage
 
 log = logging.getLogger(__name__)
 
@@ -50,9 +50,46 @@ def fetch_rss() -> list[dict]:
     return articles
 
 
+def _newsapi_rate_ok() -> bool:
+    """Return True if we are allowed to call NewsAPI right now."""
+    now = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
+
+    # Daily cap
+    count = int(storage.get_meta(f"newsapi_count_{today}") or "0")
+    if count >= config.NEWSAPI_DAILY_LIMIT:
+        log.warning("NewsAPI daily limit reached (%d/%d) — skipping until tomorrow",
+                    count, config.NEWSAPI_DAILY_LIMIT)
+        return False
+
+    # Minimum interval
+    last_str = storage.get_meta("newsapi_last_fetch")
+    if last_str:
+        last = datetime.fromisoformat(last_str)
+        elapsed = (now - last).total_seconds()
+        if elapsed < config.NEWSAPI_MIN_INTERVAL_SECONDS:
+            log.debug("NewsAPI cooldown: %.0fs remaining",
+                      config.NEWSAPI_MIN_INTERVAL_SECONDS - elapsed)
+            return False
+
+    return True
+
+
+def _newsapi_record_fetch() -> None:
+    """Increment daily counter and update last-fetch timestamp."""
+    now = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
+    count = int(storage.get_meta(f"newsapi_count_{today}") or "0")
+    storage.set_meta(f"newsapi_count_{today}", str(count + 1))
+    storage.set_meta("newsapi_last_fetch", now.isoformat())
+    log.debug("NewsAPI request #%d today", count + 1)
+
+
 def fetch_newsapi() -> list[dict]:
-    """Fetch from NewsAPI if configured."""
+    """Fetch from NewsAPI if configured and within rate limits."""
     if not config.NEWSAPI_KEY:
+        return []
+    if not _newsapi_rate_ok():
         return []
     try:
         resp = requests.get(
@@ -67,6 +104,7 @@ def fetch_newsapi() -> list[dict]:
             timeout=15,
         )
         resp.raise_for_status()
+        _newsapi_record_fetch()
         data = resp.json()
         articles = []
         for a in data.get("articles", []):
