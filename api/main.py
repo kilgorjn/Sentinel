@@ -79,7 +79,7 @@ def get_surge():
     conn = get_db()
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=config.SPIKE_WINDOW_MINUTES)).isoformat()
     row = conn.execute(
-        "SELECT COUNT(*) as cnt FROM news_events WHERE classification = 'HIGH' AND created_at >= ?",
+        "SELECT COUNT(*) as cnt FROM news_events WHERE classification = 'HIGH' AND published_at >= ?",
         (cutoff,),
     ).fetchone()
     high_count = row["cnt"] if row else 0
@@ -116,17 +116,18 @@ def get_timeseries(hours: int = Query(24, ge=1, le=168)):
     now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     buckets = [(now - timedelta(hours=i)).strftime("%Y-%m-%dT%H:00:00Z") for i in range(hours - 1, -1, -1)]
 
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     rows = conn.execute(
         """
-        SELECT strftime('%Y-%m-%dT%H:00:00', created_at) AS bucket,
+        SELECT strftime('%Y-%m-%dT%H:00:00', published_at) AS bucket,
                classification,
                COUNT(*) AS cnt
         FROM news_events
-        WHERE created_at >= datetime('now', ? || ' hours')
+        WHERE published_at >= ?
         GROUP BY bucket, classification
         ORDER BY bucket ASC
         """,
-        (f"-{hours}",),
+        (cutoff,),
     ).fetchall()
 
     # Index results by (bucket, classification); SQL returns without Z so we add it for matching
@@ -164,7 +165,7 @@ def get_narrative():
 
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=config.SPIKE_WINDOW_MINUTES)).isoformat()
     surge_row = conn.execute(
-        "SELECT COUNT(*) FROM news_events WHERE classification = 'HIGH' AND created_at >= ?",
+        "SELECT COUNT(*) FROM news_events WHERE classification = 'HIGH' AND published_at >= ?",
         (cutoff,),
     ).fetchone()
     surge_active = (surge_row[0] if surge_row else 0) >= config.SPIKE_HIGH_THRESHOLD

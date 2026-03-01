@@ -50,7 +50,14 @@ class SpikeDetector:
         self._evict_old(now)
 
         if classification == "HIGH":
-            self._events.append((now, article.get("title", "")))
+            pub = article.get("published_at")
+            if isinstance(pub, datetime):
+                event_time = pub if pub.tzinfo else pub.replace(tzinfo=timezone.utc)
+            else:
+                event_time = now
+            # Ignore articles published outside the window (avoids false surges on fresh DB)
+            if event_time >= now - self.window:
+                self._events.append((event_time, article.get("title", "")))
 
         count = len(self._events)
         log.debug("HIGH events in last %d min: %d / %d", self.window.seconds // 60, count, self.threshold)
