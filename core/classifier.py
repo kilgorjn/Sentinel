@@ -1,39 +1,13 @@
-"""Classify financial news articles using Ollama for urgency and FinBERT for sentiment."""
+"""Classify financial news articles using a local Ollama LLM."""
 
+import re
 import logging
-from typing import Any, Optional
 
 import requests
-from transformers import BertTokenizer, BertForSequenceClassification, pipeline
 
 from . import config
 
 log = logging.getLogger(__name__)
-
-# Initialize FinBERT sentiment pipeline on first use
-_sentiment_pipeline: Optional[Any] = None
-
-
-def _get_sentiment_pipeline() -> Any:
-    """Lazy-load FinBERT sentiment pipeline (yiyanghkust/finbert-tone).
-
-    Loaded with explicit BERT classes because finbert-tone omits model_type
-    in its config.json, which causes the auto-detection in pipeline() to fail.
-    """
-    global _sentiment_pipeline
-    if _sentiment_pipeline is None:
-        log.info("Loading FinBERT sentiment model...")
-        _model_id = "yiyanghkust/finbert-tone"
-        tokenizer = BertTokenizer.from_pretrained(_model_id)
-        model = BertForSequenceClassification.from_pretrained(_model_id)
-        _sentiment_pipeline = pipeline(  # type: ignore
-            "sentiment-analysis",
-            model=model,
-            tokenizer=tokenizer,
-            device=-1,  # -1 for CPU, 0+ for GPU
-        )
-        log.info("FinBERT sentiment model loaded.")
-    return _sentiment_pipeline
 
 _PROMPT_TEMPLATE = """\
 You are a financial news classifier for a large brokerage firm.
@@ -83,28 +57,9 @@ def _call_ollama(prompt: str) -> str:
     return resp.json().get("response", "").strip()
 
 
-def _analyze_sentiment(title: str, summary: str) -> tuple:
-    """Analyze sentiment using FinBERT. Returns (label, score) tuple.
-    Label is 'POSITIVE', 'NEGATIVE', or 'NEUTRAL'. Score is the model confidence [0-1].
-    """
-    try:
-        pipe = _get_sentiment_pipeline()
-        text = f"{title}. {summary}"[:512]
-        result = pipe(text)[0]
-        label = result["label"].upper()
-        score = result["score"]
-        log.debug("FinBERT sentiment for '%s': %s (%.2f)", title[:50], label, score)
-        if label not in ("POSITIVE", "NEGATIVE"):
-            label = "NEUTRAL"
-        return label, score
-    except Exception as e:
-        log.warning("FinBERT sentiment analysis failed: %s", e)
-        return "NEUTRAL", None
-
-
 def _parse_response(text: str) -> dict:
-    """Extract classification, confidence, reason, and ollama_sentiment from Ollama output."""
-    result = {"classification": "LOW", "confidence": 0.5, "reason": "", "ollama_sentiment": "NEUTRAL"}
+    """Extract classification, confidence, reason, and sentiment from Ollama output."""
+    result = {"classification": "LOW", "confidence": 0.5, "reason": "", "sentiment": "NEUTRAL"}
 
     for line in text.splitlines():
         line = line.strip()
@@ -125,7 +80,7 @@ def _parse_response(text: str) -> dict:
         elif line.startswith("SENTIMENT:"):
             for s in ("POSITIVE", "NEGATIVE", "NEUTRAL"):
                 if s in line.upper():
-                    result["ollama_sentiment"] = s
+                    result["sentiment"] = s
                     break
 
     return result
@@ -134,14 +89,13 @@ def _parse_response(text: str) -> dict:
 def classify(article: dict) -> dict:
     """
     Classify a single article dict (must have 'title' and 'summary').
-    Returns dict with keys: classification, confidence, reason, sentiment.
-    Uses Ollama for urgency classification and FinBERT for sentiment analysis.
+    Returns dict with keys: classification, confidence, reason.
     Falls back to LOW on any error.
     """
-    title = article.get("title", "")
-    summary = article.get("summary", "")[:500]
-    prompt = _PROMPT_TEMPLATE.format(title=title, summary=summary)
-
+    prompt = _PROMPT_TEMPLATE.format(
+        title=article.get("title", ""),
+        summary=article.get("summary", "")[:500],
+    )
     try:
         raw = _call_ollama(prompt)
         log.debug("Ollama raw response: %s", raw)
@@ -155,37 +109,14 @@ def classify(article: dict) -> dict:
             result["classification"] = "LOW"
             result["reason"] += " (downgraded: low confidence)"
 
-        # Run FinBERT sentiment independently
-        finbert_label, finbert_score = _analyze_sentiment(title, summary)
-
-        # Per-model sentiments — extensible for future models
-        result["sentiments"] = {
-            "finbert": {"sentiment": finbert_label, "score": finbert_score},
-            "ollama":  {"sentiment": result.pop("ollama_sentiment"), "score": None},
-        }
-        # Primary sentiment (FinBERT) kept at top level for backward compat
-        result["sentiment"] = finbert_label
-
         return result
 
     except requests.exceptions.Timeout:
-        log.error("Ollama timed out classifying: %s", title)
-        return {
-            "classification": "LOW",
-            "confidence": 0.0,
-            "reason": "Ollama timeout",
-            "sentiment": "NEUTRAL",
-            "sentiments": {},
-        }
+        log.error("Ollama timed out classifying: %s", article.get("title"))
+        return {"classification": "LOW", "confidence": 0.0, "reason": "Ollama timeout"}
     except Exception as e:
-        log.error("Ollama error for '%s': %s", title, e)
-        return {
-            "classification": "LOW",
-            "confidence": 0.0,
-            "reason": f"Error: {e}",
-            "sentiment": "NEUTRAL",
-            "sentiments": {},
-        }
+        log.error("Ollama error for '%s': %s", article.get("title"), e)
+        return {"classification": "LOW", "confidence": 0.0, "reason": f"Error: {e}"}
 
 
 _SUMMARY_PROMPT = """\
