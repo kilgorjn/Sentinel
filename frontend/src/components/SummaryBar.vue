@@ -129,10 +129,13 @@ function scoreBarStyle() {
 
 <style scoped>
 .summary-bar { display: flex; gap: 12px; align-items: stretch;
-               padding: 16px 20px; border-bottom: 1px solid #1e1e1e; }
+               padding: 16px 20px; border-bottom: 1px solid #1e1e1e;
+               overflow-x: auto; -webkit-overflow-scrolling: touch;
+               scrollbar-width: none; }
+.summary-bar::-webkit-scrollbar { display: none; }
 
 .tile { border: 2px solid #333; border-radius: 6px; padding: 10px 16px; text-align: center;
-        min-width: 96px; cursor: pointer; transition: opacity 0.15s, background 0.15s; }
+        min-width: 96px; flex-shrink: 0; cursor: pointer; transition: opacity 0.15s, background 0.15s; }
 .tile:hover { background: #1a1a1a; }
 .tile.active { background: #1a1a1a; }
 .tile.dimmed { opacity: 0.35; }
@@ -144,7 +147,7 @@ function scoreBarStyle() {
 .s-chip { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.02em; }
 
 /* Total tile */
-.total { border-color: #444; min-width: 112px; }
+.total { border-color: #444; min-width: 112px; flex-shrink: 0; }
 .total-count-row { display: flex; align-items: baseline; justify-content: center; gap: 6px; }
 .overall-symbol { font-size: 1.4rem; font-weight: 700; line-height: 1; }
 .overall-label { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em;
