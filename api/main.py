@@ -13,6 +13,7 @@ from core import config
 from api.models import (
     NewsEvent, SummaryResponse, ClassificationCount, SentimentBreakdown,
     SurgeResponse, HealthResponse, NarrativeResponse, ConfigResponse, TimeseriesResponse,
+    SentimentScore,
 )
 from api.dependencies import get_db
 
@@ -115,6 +116,19 @@ def get_summary():
         overall_sentiment=overall,
         overall_sentiment_score=round(score, 3),
     )
+
+
+@router.get("/events/{event_id}/sentiments", response_model=list[SentimentScore])
+def get_event_sentiments(event_id: int):
+    """Return per-model sentiment scores for a single event."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT model, sentiment, score FROM sentiment_scores WHERE event_id = ? ORDER BY model",
+        (event_id,),
+    ).fetchall()
+    if not rows:
+        raise HTTPException(status_code=404, detail="No sentiment scores found for this event")
+    return [dict(r) for r in rows]
 
 
 @router.get("/surge", response_model=SurgeResponse)

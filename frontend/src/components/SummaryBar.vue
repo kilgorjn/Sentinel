@@ -9,13 +9,13 @@ const COLORS = { HIGH: '#e05252', MEDIUM: '#e0a832', LOW: '#4a9eda' }
 const SENTIMENT_META = {
   POSITIVE: { symbol: '▲', color: '#3a7d5a' },
   NEGATIVE: { symbol: '▼', color: '#a05060' },
-  NEUTRAL:  { symbol: '—', color: '#3a3a3a' },
+  NEUTRAL:  { symbol: '~', color: '#555' },
 }
 
 const OVERALL_META = {
   POSITIVE: { symbol: '▲', color: '#3a7d5a', label: 'Positive' },
   NEGATIVE: { symbol: '▼', color: '#a05060', label: 'Negative' },
-  NEUTRAL:  { symbol: '—', color: '#555',    label: 'Neutral'  },
+  NEUTRAL:  { symbol: '~', color: '#555',    label: 'Neutral'  },
 }
 
 function countFor(cls) {
@@ -63,7 +63,7 @@ function scoreBarStyle() {
           ▼{{ sentimentFor(cls).negative }}
         </span>
         <span class="s-chip" :style="{ color: SENTIMENT_META.NEUTRAL.color }">
-          —{{ sentimentFor(cls).neutral }}
+          ~{{ sentimentFor(cls).neutral }}
         </span>
       </div>
     </div>
@@ -100,19 +100,19 @@ function scoreBarStyle() {
             <span class="tt-cls">HIGH &times;3</span>
             <span :style="{ color: '#3a7d5a' }">▲{{ sentimentFor('HIGH').positive }}</span>
             <span :style="{ color: '#a05060' }">▼{{ sentimentFor('HIGH').negative }}</span>
-            <span :style="{ color: '#444' }">—{{ sentimentFor('HIGH').neutral }}</span>
+            <span :style="{ color: '#444' }">~{{ sentimentFor('HIGH').neutral }}</span>
           </div>
           <div class="tt-row">
             <span class="tt-cls">MEDIUM &times;2</span>
             <span :style="{ color: '#3a7d5a' }">▲{{ sentimentFor('MEDIUM').positive }}</span>
             <span :style="{ color: '#a05060' }">▼{{ sentimentFor('MEDIUM').negative }}</span>
-            <span :style="{ color: '#444' }">—{{ sentimentFor('MEDIUM').neutral }}</span>
+            <span :style="{ color: '#444' }">~{{ sentimentFor('MEDIUM').neutral }}</span>
           </div>
           <div class="tt-row">
             <span class="tt-cls">LOW &times;1</span>
             <span :style="{ color: '#3a7d5a' }">▲{{ sentimentFor('LOW').positive }}</span>
             <span :style="{ color: '#a05060' }">▼{{ sentimentFor('LOW').negative }}</span>
-            <span :style="{ color: '#444' }">—{{ sentimentFor('LOW').neutral }}</span>
+            <span :style="{ color: '#444' }">~{{ sentimentFor('LOW').neutral }}</span>
           </div>
         </div>
       </div>

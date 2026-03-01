@@ -18,6 +18,12 @@ class NewsEvent(BaseModel):
     created_at: str
 
 
+class SentimentScore(BaseModel):
+    model: str
+    sentiment: str
+    score: Optional[float] = None
+
+
 class SentimentBreakdown(BaseModel):
     positive: int = 0
     negative: int = 0

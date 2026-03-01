@@ -27,13 +27,25 @@ CREATE TABLE IF NOT EXISTS news_events (
     classification  TEXT NOT NULL,
     confidence      REAL,
     reason          TEXT,
-    sentiment       TEXT,
+    sentiment       TEXT,        -- primary sentiment (FinBERT); see sentiment_scores for per-model breakdown
     actual_impact   TEXT,        -- filled in manually after Splunk correlation
     created_at      TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_classification ON news_events(classification);
 CREATE INDEX IF NOT EXISTS idx_created_at     ON news_events(created_at);
+
+CREATE TABLE IF NOT EXISTS sentiment_scores (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id    INTEGER NOT NULL REFERENCES news_events(id) ON DELETE CASCADE,
+    model       TEXT NOT NULL,   -- e.g. 'finbert', 'ollama'
+    sentiment   TEXT NOT NULL,   -- POSITIVE | NEGATIVE | NEUTRAL
+    score       REAL,            -- model confidence [0-1], NULL if unavailable
+    created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sentiment_event ON sentiment_scores(event_id);
+CREATE INDEX IF NOT EXISTS idx_sentiment_model ON sentiment_scores(model);
 
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
@@ -50,12 +62,15 @@ def _get_conn() -> sqlite3.Connection:
     if _conn is None:
         _conn = sqlite3.connect(config.DB_PATH, check_same_thread=False)
         _conn.executescript(_SCHEMA)
-        # Migrate existing databases that predate the sentiment column
-        try:
-            _conn.execute("ALTER TABLE news_events ADD COLUMN sentiment TEXT")
-            _conn.commit()
-        except sqlite3.OperationalError:
-            pass  # Column already exists
+        # Migrate existing databases that predate newer columns/tables
+        for migration in [
+            "ALTER TABLE news_events ADD COLUMN sentiment TEXT",
+        ]:
+            try:
+                _conn.execute(migration)
+                _conn.commit()
+            except sqlite3.OperationalError:
+                pass  # Already exists
     return _conn
 
 
@@ -68,7 +83,7 @@ def save_event(article: dict, result: dict) -> None:
     # --- SQLite ---
     try:
         conn = _get_conn()
-        conn.execute(
+        cur = conn.execute(
             """
             INSERT INTO news_events
               (title, source, url, published_at, classification, confidence, reason, sentiment, created_at)
@@ -86,6 +101,16 @@ def save_event(article: dict, result: dict) -> None:
                 now,
             ),
         )
+        event_id = cur.lastrowid
+
+        # Write per-model sentiment scores
+        sentiments = result.get("sentiments", {})
+        for model_name, data in sentiments.items():
+            conn.execute(
+                "INSERT INTO sentiment_scores (event_id, model, sentiment, score, created_at) VALUES (?, ?, ?, ?, ?)",
+                (event_id, model_name, data.get("sentiment", "NEUTRAL"), data.get("score"), now),
+            )
+
         conn.commit()
     except Exception as e:
         log.error("SQLite write failed: %s", e)
