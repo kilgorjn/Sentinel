@@ -1,0 +1,12 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime output — don't commit local data
+news_events.db
+financial_news.log
+
+# Secrets
+.env
