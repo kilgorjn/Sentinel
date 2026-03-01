@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- sclera -->
+  <path d="M2 16 C5 9 10 7 16 7 C22 7 27 9 30 16 C27 23 22 25 16 25 C10 25 5 23 2 16 Z"
+        fill="#dce8f0"/>
+  <!-- upper eyelid shadow -->
+  <path d="M2 16 C5 9 10 7 16 7 C22 7 27 9 30 16"
+        fill="none" stroke="#1a1a2e" stroke-width="3" stroke-linecap="round"/>
+  <!-- iris outer -->
+  <circle cx="16" cy="16" r="7" fill="#005f7a"/>
+  <!-- iris inner ring -->
+  <circle cx="16" cy="16" r="5.4" fill="#0090b0"/>
+  <!-- pupil -->
+  <circle cx="16" cy="16" r="3" fill="#060810"/>
+  <!-- catchlight primary -->
+  <circle cx="18.5" cy="13" r="1.8" fill="white" opacity="0.85"/>
+  <!-- catchlight secondary -->
+  <circle cx="13.2" cy="19" r="0.9" fill="white" opacity="0.35"/>
+  <!-- iris rim glow -->
+  <circle cx="16" cy="16" r="7" fill="none" stroke="#00c8ef" stroke-width="0.7" opacity="0.6"/>
+</svg>
