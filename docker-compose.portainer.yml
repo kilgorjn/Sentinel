@@ -1,0 +1,34 @@
+services:
+
+  monitor:
+    image: ghcr.io/kilgorjn/sentinel:latest
+    command: python -m core.monitor
+    volumes:
+      - sentinel-data:/data
+    environment:
+      - SENTINEL_DB_PATH=/data/news_events.db
+      - SENTINEL_LOG_PATH=/data/financial_news.log
+      - OLLAMA_URL=${OLLAMA_URL}
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
+      - NEWSAPI_KEY=${NEWSAPI_KEY}
+      - DISPLAY_TIMEZONE=${DISPLAY_TIMEZONE}
+    restart: unless-stopped
+
+  api:
+    image: ghcr.io/kilgorjn/sentinel:latest
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - sentinel-data:/data
+    environment:
+      - SENTINEL_DB_PATH=/data/news_events.db
+      - SENTINEL_LOG_PATH=/data/financial_news.log
+      - OLLAMA_URL=${OLLAMA_URL}
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
+      - DISPLAY_TIMEZONE=${DISPLAY_TIMEZONE}
+    restart: unless-stopped
+
+volumes:
+  sentinel-data:
+    external: false

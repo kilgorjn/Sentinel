@@ -5,8 +5,8 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent  # project root (Sentinel/)
 
 # Ollama server
-OLLAMA_URL = "http://jeffs-gaming-pc.lan:11434"
-OLLAMA_MODEL = "gemma3:12b"       # Best accuracy; swap to "qwen3:8b" for speed
+OLLAMA_URL   = os.getenv("OLLAMA_URL",   "http://jeffs-gaming-pc.lan:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:12b")  # Best accuracy; swap to "qwen3:8b" for speed
 OLLAMA_TEMPERATURE = 0.3          # Low = consistent classification
 OLLAMA_TIMEOUT = 60               # Seconds to wait for inference
 
