@@ -6,7 +6,7 @@ import NarrativeSummary from './components/NarrativeSummary.vue'
 import EventFeed        from './components/EventFeed.vue'
 
 const events      = ref([])
-const summary     = ref({ counts: [], total: 0 })
+const summary     = ref({ counts: [], total: 0, overall_sentiment: null, overall_sentiment_score: 0 })
 const surge       = ref({ surge_active: false, high_count_in_window: 0, window_minutes: 30 })
 const narrative   = ref({ text: '', generated_at: null, surge_active: false })
 const timeseries  = ref({ labels: [], high: [], medium: [], low: [] })

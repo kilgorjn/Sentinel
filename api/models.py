@@ -18,15 +18,24 @@ class NewsEvent(BaseModel):
     created_at: str
 
 
+class SentimentBreakdown(BaseModel):
+    positive: int = 0
+    negative: int = 0
+    neutral: int = 0
+
+
 class ClassificationCount(BaseModel):
     classification: str
     count: int
+    sentiment: SentimentBreakdown = SentimentBreakdown()
 
 
 class SummaryResponse(BaseModel):
     window_hours: int
     counts: list[ClassificationCount]
     total: int
+    overall_sentiment: str           # POSITIVE | NEGATIVE | NEUTRAL
+    overall_sentiment_score: float   # weighted score in [-1.0, 1.0]
 
 
 class SurgeResponse(BaseModel):

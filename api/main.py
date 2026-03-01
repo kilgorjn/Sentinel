@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from core import config
 from api.models import (
-    NewsEvent, SummaryResponse, ClassificationCount,
+    NewsEvent, SummaryResponse, ClassificationCount, SentimentBreakdown,
     SurgeResponse, HealthResponse, NarrativeResponse, ConfigResponse, TimeseriesResponse,
 )
 from api.dependencies import get_db
@@ -52,24 +52,68 @@ def get_events(
     return [dict(r) for r in rows]
 
 
+_CLS_WEIGHT   = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
+_SENT_SCORE   = {"POSITIVE": 1, "NEGATIVE": -1, "NEUTRAL": 0}
+_SENT_THRESH  = 0.10   # score must exceed ±10% to be called directional
+
+
 @router.get("/events/summary", response_model=SummaryResponse)
 def get_summary():
-    """Classification counts for the last 24 hours."""
+    """Classification counts with per-tier sentiment breakdown and weighted overall sentiment."""
     conn = get_db()
     rows = conn.execute(
         """
-        SELECT classification, COUNT(*) as count
+        SELECT classification, COALESCE(sentiment, 'NEUTRAL') AS sentiment, COUNT(*) AS cnt
         FROM news_events
         WHERE created_at >= datetime('now', '-24 hours')
-        GROUP BY classification
-        ORDER BY count DESC
+        GROUP BY classification, sentiment
         """
     ).fetchall()
-    counts = [ClassificationCount(classification=r["classification"], count=r["count"]) for r in rows]
+
+    # Roll up into per-classification buckets
+    from collections import defaultdict
+    buckets: dict = defaultdict(lambda: {"positive": 0, "negative": 0, "neutral": 0, "total": 0})
+    weighted_score = 0.0
+    weighted_total = 0.0
+
+    for row in rows:
+        cls  = row["classification"]
+        sent = (row["sentiment"] or "NEUTRAL").upper()
+        cnt  = row["cnt"]
+        key  = sent.lower() if sent in ("POSITIVE", "NEGATIVE") else "neutral"
+        buckets[cls][key]    += cnt
+        buckets[cls]["total"] += cnt
+        w = _CLS_WEIGHT.get(cls, 1)
+        weighted_score += w * _SENT_SCORE.get(sent, 0) * cnt
+        weighted_total += w * cnt
+
+    counts = [
+        ClassificationCount(
+            classification=cls,
+            count=data["total"],
+            sentiment=SentimentBreakdown(
+                positive=data["positive"],
+                negative=data["negative"],
+                neutral=data["neutral"],
+            ),
+        )
+        for cls, data in buckets.items()
+    ]
+
+    score = (weighted_score / weighted_total) if weighted_total else 0.0
+    if score > _SENT_THRESH:
+        overall = "POSITIVE"
+    elif score < -_SENT_THRESH:
+        overall = "NEGATIVE"
+    else:
+        overall = "NEUTRAL"
+
     return SummaryResponse(
         window_hours=24,
         counts=counts,
         total=sum(c.count for c in counts),
+        overall_sentiment=overall,
+        overall_sentiment_score=round(score, 3),
     )
 
 
