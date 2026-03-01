@@ -13,6 +13,7 @@ class NewsEvent(BaseModel):
     classification: str
     confidence: Optional[float] = None
     reason: Optional[str] = None
+    sentiment: Optional[str] = None
     actual_impact: Optional[str] = None
     created_at: str
 

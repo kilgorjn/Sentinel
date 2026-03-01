@@ -2,114 +2,111 @@
 
 Monitors financial news feeds, classifies articles by market impact using a local Ollama LLM, and fires alerts when a burst of high-impact events is detected. Designed to give brokerage ops teams advance warning before login volume spikes hit.
 
+A web UI displays the live event feed, classification summary, an AI-generated narrative, and a 24-hour trend chart — all auto-refreshing every 30 seconds.
+
 ## How it works
 
 ```
 RSS Feeds / NewsAPI
       ↓
-  feeds.py        — fetch & deduplicate articles every 5 minutes
+  core/feeds.py       — fetch & deduplicate articles every 5 minutes
       ↓
-  classifier.py   — ask local Ollama to classify each article HIGH / MEDIUM / LOW
+  core/classifier.py  — ask local Ollama to classify each article HIGH / MEDIUM / LOW
+                        and generate a narrative summary of current events
       ↓
-  spike_detector  — sliding 30-min window; SURGE alert when ≥3 HIGH events accumulate
+  core/spike_detector — sliding 30-min window; SURGE alert when ≥3 HIGH events accumulate
       ↓
-  storage.py      — write to SQLite (accuracy tracking) + JSON log (Splunk ingestion)
+  core/storage.py     — write to SQLite (accuracy tracking) + JSON log (Splunk ingestion)
       ↓
-  alerts.py       — color-coded console output; optional Slack webhook
+  core/alerts.py      — color-coded console output; optional Slack webhook
+      ↓
+  api/main.py         — FastAPI REST API consumed by the Vue frontend
 ```
 
 The spike detection mirrors a login-volume spike pattern: instead of counting logins per time window, it counts HIGH-impact news events. A burst of major events is a leading indicator that user logins will spike within 10–15 minutes.
 
 ## Prerequisites
 
-- Python 3.9+
-- [Ollama](https://ollama.ai) running on a host reachable by this machine (default config points to `jeffs-gaming-pc.lan:11434`)
+- [Docker](https://docs.docker.com/get-docker/) and Docker Compose
+- [Ollama](https://ollama.ai) running on a host reachable by the Docker containers
 - A model pulled on that Ollama server — `gemma3:12b` is the default; `qwen3:8b` is a faster alternative
 
 Check available models on your server:
 ```bash
-curl http://jeffs-gaming-pc.lan:11434/api/tags | python3 -m json.tool
+curl http://your-ollama-host:11434/api/tags | python3 -m json.tool
 ```
 
-## Installation
+## Quick start (Docker)
 
 ```bash
-git clone <repo-url>
-cd sentinel
+git clone https://github.com/kilgorjn/Sentinel.git
+cd Sentinel
 
-python3 -m venv .venv
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
+cp .env.example .env
+# Edit .env — set OLLAMA_URL and optionally NEWSAPI_KEY
 
-pip install -r requirements.txt
+docker compose up --build -d
 ```
+
+The web UI will be available at `http://localhost:8000`.
 
 ## Configuration
 
-All settings live in [config.py](config.py). The key ones to review before first run:
+Copy `.env.example` to `.env` and set values. All settings can also be overridden via environment variables.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `OLLAMA_URL` | `http://jeffs-gaming-pc.lan:11434` | Ollama server address |
-| `OLLAMA_MODEL` | `gemma3:12b` | Model to use for classification |
-| `RSS_FEEDS` | WSJ, CNBC, Reuters, Yahoo | News sources (free, no API key) |
-| `NEWSAPI_KEY` | `None` | Optional — 100 req/day free at newsapi.org |
+| `OLLAMA_MODEL` | `gemma3:12b` | Model to use for classification and narrative |
+| `NEWSAPI_KEY` | *(unset)* | Optional — 100 req/day free at newsapi.org |
+| `DISPLAY_TIMEZONE` | `America/New_York` | Timezone for all frontend timestamps |
 | `SPIKE_WINDOW_MINUTES` | `30` | Rolling window for burst detection |
 | `SPIKE_HIGH_THRESHOLD` | `3` | HIGH events in window before SURGE fires |
 | `POLL_INTERVAL_SECONDS` | `300` | How often to fetch news (5 minutes) |
-| `MARKET_HOURS_ONLY` | `True` | Skip nights and weekends |
-| `SLACK_WEBHOOK_URL` | `None` | Set to enable Slack alerts |
+| `MARKET_HOURS_ONLY` | `False` | Set `True` to restrict polling to 09:00–17:00 ET Mon–Fri |
+| `SLACK_WEBHOOK_URL` | *(unset)* | Set to enable Slack surge alerts |
 
-## Usage
+Additional settings (RSS feeds, confidence thresholds) live in `core/config.py`.
 
-### Smoke test
-Classifies 5 built-in sample articles and exits — useful for verifying Ollama connectivity and classification quality before running live:
+## Web UI
 
-```bash
-python monitor.py --test
-```
+The frontend provides:
 
-Expected output:
-```
-[HIGH]   Federal Reserve Cuts Interest Rates by 50 Basis Points...
-         Source: Reuters  |  Confidence: 90%
-         Reason: Surprise broad-market rate cut — concrete Fed action...
+- **Summary bar** — HIGH / MEDIUM / LOW counts for the last 24 hours; click tiles to toggle visibility
+- **Trend chart** — 24-hour line chart showing event volume per classification, based on article publication time
+- **Narrative summary** — AI-generated 3–4 sentence analysis of current events, updated every 15 minutes; surge-aware (explains what is driving the spike when a SURGE is active)
+- **Event feed** — Full list of classified articles with source, timestamp, confidence, and reason
 
-[MEDIUM] Apple Reports Record Quarterly Earnings, Beats Analyst Estimates
-         ...
+## Portainer / Docker stack deployment
 
-[LOW]    Goldman Sachs Analyst Upgrades Ford to Buy
-         ...
-```
+Use `docker-compose.portainer.yml` to create a Portainer stack. Fill in `stack.env` with your values and upload it as the stack environment file.
 
-### Production loop
+The Docker image is published automatically to `ghcr.io/kilgorjn/sentinel:latest` on every push to `main` via GitHub Actions.
+
+## Local development (without Docker)
 
 ```bash
-python monitor.py
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Smoke test — classifies 5 sample articles and exits
+python -m core.monitor --test
+
+# Production loop
+python -m core.monitor
 ```
 
-Runs continuously, polling every 5 minutes during market hours (09:00–17:00 ET, Mon–Fri). Ctrl+C to stop.
+Frontend dev server (hot reload):
+```bash
+cd frontend
+npm install
+npm run dev       # http://localhost:5173 (proxies API calls to http://localhost:8000)
+```
 
-### Run as a background service (macOS launchd)
-
-Create `/Library/LaunchDaemons/com.sentinel.news.plist`:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>           <string>com.sentinel.news</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/Users/jeff/VSCodeProjects/Sentinel/.venv/bin/python</string>
-    <string>/Users/jeff/VSCodeProjects/Sentinel/monitor.py</string>
-  </array>
-  <key>RunAtLoad</key>       <true/>
-  <key>KeepAlive</key>       <true/>
-  <key>StandardOutPath</key> <string>/var/log/sentinel.log</string>
-  <key>StandardErrorPath</key><string>/var/log/sentinel.log</string>
-</dict>
-</plist>
+API server:
+```bash
+uvicorn api.main:app --reload --port 8000
 ```
 
 ## Output files
@@ -131,21 +128,22 @@ index=news classification=HIGH
 ```
 
 ### `news_events.db`
-SQLite database for tracking classification accuracy over time. After you've correlated a news event with an actual login spike, fill in the `actual_impact` column manually:
+SQLite database for tracking classification accuracy over time.
 
 ```bash
-sqlite3 news_events.db
+# Access the DB inside the running Docker container
+docker exec -it sentinel-api-1 sqlite3 /data/news_events.db
 
--- See today's breakdown
+-- Today's breakdown
 SELECT classification, COUNT(*) FROM news_events
-WHERE created_at >= datetime('now', '-24 hours')
+WHERE published_at >= datetime('now', '-24 hours')
 GROUP BY classification;
 
--- Record that a HIGH event actually drove a spike
+-- Record that a HIGH event actually drove a login spike
 UPDATE news_events SET actual_impact = 'confirmed_spike'
-WHERE title LIKE '%Federal Reserve%' AND DATE(created_at) = '2026-02-28';
+WHERE title LIKE '%Federal Reserve%';
 
--- Measure classifier accuracy after a few months
+-- Measure classifier accuracy
 SELECT classification, actual_impact, COUNT(*)
 FROM news_events
 WHERE actual_impact IS NOT NULL
@@ -162,26 +160,42 @@ GROUP BY classification, actual_impact;
 
 ## Tuning
 
-**Too many false HIGH alerts?** Raise `HIGH_CONFIDENCE_MIN` in `config.py` (e.g. `0.75`) to require the model to be more certain before a HIGH sticks.
+**Too many false HIGH alerts?** Raise `HIGH_CONFIDENCE_MIN` in `core/config.py` (e.g. `0.75`).
 
 **Surge fires too easily?** Increase `SPIKE_HIGH_THRESHOLD` (e.g. `5`) or extend `SPIKE_WINDOW_MINUTES`.
 
-**Slower machine / want faster classification?** Switch `OLLAMA_MODEL` to `qwen3:8b` in `config.py`.
+**Slower machine / want faster classification?** Set `OLLAMA_MODEL=qwen3:8b` in `.env`.
 
-**Want to add a news source?** Append an RSS URL to `RSS_FEEDS` in `config.py` — no code changes needed.
+**Want to add a news source?** Append an RSS URL to `RSS_FEEDS` in `core/config.py` — no code changes needed.
 
-## File reference
+## Project structure
 
 ```
-sentinel/
-├── monitor.py          Main entry point and polling loop
-├── feeds.py            RSS + NewsAPI fetch and deduplication
-├── classifier.py       Ollama HTTP client and response parser
-├── spike_detector.py   Sliding-window burst detection
-├── storage.py          SQLite + JSON log writer
-├── alerts.py           Console and Slack alert dispatch
-├── config.py           All configuration settings
-├── requirements.txt    feedparser, requests
-├── news_events.db      Created on first run — SQLite store
-└── financial_news.log  Created on first run — Splunk-ready log
+Sentinel/
+├── core/
+│   ├── monitor.py          Main entry point and polling loop
+│   ├── feeds.py            RSS + NewsAPI fetch and deduplication
+│   ├── classifier.py       Ollama HTTP client, classifier, and narrative summarizer
+│   ├── spike_detector.py   Sliding-window burst detection
+│   ├── storage.py          SQLite + JSON log writer; meta key-value store
+│   ├── alerts.py           Console and Slack alert dispatch
+│   └── config.py           All configuration settings
+├── api/
+│   ├── main.py             FastAPI application and route handlers
+│   ├── models.py           Pydantic response schemas
+│   └── dependencies.py     Shared DB connection
+├── frontend/
+│   ├── src/
+│   │   ├── App.vue         Root component; data fetching and state
+│   │   └── components/     SummaryBar, EventFeed, EventChart, NarrativeSummary, SurgeAlert
+│   ├── public/favicon.svg
+│   └── package.json
+├── .github/workflows/
+│   └── docker-publish.yml  Build and push to ghcr.io on push to main
+├── Dockerfile              Multi-stage build (Node → Vue dist, Python app)
+├── docker-compose.yml      Local development / self-hosted
+├── docker-compose.portainer.yml  Portainer stack (uses published image)
+├── stack.env               Environment variable template for Portainer
+├── .env.example            Local .env template
+└── requirements.txt        Python dependencies
 ```

@@ -27,11 +27,17 @@ Respond with ONLY this format — no other text:
 CLASSIFICATION: [HIGH|MEDIUM|LOW]
 CONFIDENCE: [0.0-1.0]
 REASON: [one sentence]
+SENTIMENT: [POSITIVE|NEGATIVE|NEUTRAL]
 
 CLASSIFICATION levels:
 HIGH — Concrete broad-market event: Fed rate decisions, major economic data (CPI, jobs), >3% market moves, trading halts
 MEDIUM — Company-specific event or rumor: earnings beats/misses, Fed speculation, IPO, options expiration
 LOW — Analyst opinions, minor upgrades, general commentary, already-priced-in news
+
+SENTIMENT levels:
+POSITIVE — Good news: rate cuts, strong jobs/earnings, market rallies, deal closings
+NEGATIVE — Bad news: rate hikes, recession signals, market drops, scandals, halts
+NEUTRAL — Informational, mixed, or ambiguous impact on investor mood
 """
 
 
@@ -52,8 +58,8 @@ def _call_ollama(prompt: str) -> str:
 
 
 def _parse_response(text: str) -> dict:
-    """Extract classification, confidence, reason from Ollama output."""
-    result = {"classification": "LOW", "confidence": 0.5, "reason": ""}
+    """Extract classification, confidence, reason, and sentiment from Ollama output."""
+    result = {"classification": "LOW", "confidence": 0.5, "reason": "", "sentiment": "NEUTRAL"}
 
     for line in text.splitlines():
         line = line.strip()
@@ -71,6 +77,11 @@ def _parse_response(text: str) -> dict:
                 pass
         elif line.startswith("REASON:"):
             result["reason"] = line.split(":", 1)[-1].strip()
+        elif line.startswith("SENTIMENT:"):
+            for s in ("POSITIVE", "NEGATIVE", "NEUTRAL"):
+                if s in line.upper():
+                    result["sentiment"] = s
+                    break
 
     return result
 

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS news_events (
     classification  TEXT NOT NULL,
     confidence      REAL,
     reason          TEXT,
+    sentiment       TEXT,
     actual_impact   TEXT,        -- filled in manually after Splunk correlation
     created_at      TEXT NOT NULL
 );
@@ -49,7 +50,12 @@ def _get_conn() -> sqlite3.Connection:
     if _conn is None:
         _conn = sqlite3.connect(config.DB_PATH, check_same_thread=False)
         _conn.executescript(_SCHEMA)
-        _conn.commit()
+        # Migrate existing databases that predate the sentiment column
+        try:
+            _conn.execute("ALTER TABLE news_events ADD COLUMN sentiment TEXT")
+            _conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column already exists
     return _conn
 
 
@@ -65,8 +71,8 @@ def save_event(article: dict, result: dict) -> None:
         conn.execute(
             """
             INSERT INTO news_events
-              (title, source, url, published_at, classification, confidence, reason, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              (title, source, url, published_at, classification, confidence, reason, sentiment, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 article.get("title", ""),
@@ -76,6 +82,7 @@ def save_event(article: dict, result: dict) -> None:
                 result.get("classification", "LOW"),
                 result.get("confidence", 0.0),
                 result.get("reason", ""),
+                result.get("sentiment"),
                 now,
             ),
         )
@@ -93,6 +100,7 @@ def save_event(article: dict, result: dict) -> None:
         "classification": result.get("classification", "LOW"),
         "confidence": result.get("confidence", 0.0),
         "reason": result.get("reason", ""),
+        "sentiment": result.get("sentiment"),
     }
     try:
         with open(config.LOG_PATH, "a", encoding="utf-8") as fh:
