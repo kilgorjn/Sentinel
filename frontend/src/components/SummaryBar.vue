@@ -1,7 +1,7 @@
 <script setup>
 import EventChart from './EventChart.vue'
 
-const props = defineProps({ summary: Object, activeFilter: String, timeseries: Object })
+const props = defineProps({ summary: Object, hiddenClasses: Object, timeseries: Object })
 const emit  = defineEmits(['filter'])
 
 const COLORS = { HIGH: '#e05252', MEDIUM: '#e0a832', LOW: '#4a9eda' }
@@ -18,7 +18,7 @@ function countFor(cls) {
       v-for="cls in ['HIGH', 'MEDIUM', 'LOW']"
       :key="cls"
       class="tile"
-      :class="{ active: activeFilter === cls, dimmed: activeFilter && activeFilter !== cls }"
+      :class="{ dimmed: hiddenClasses.has(cls) }"
       :style="{ borderColor: COLORS[cls] }"
       @click="emit('filter', cls)"
     >
@@ -27,14 +27,14 @@ function countFor(cls) {
     </div>
     <div
       class="tile total"
-      :class="{ active: !activeFilter }"
+      :class="{ active: hiddenClasses.size === 0 }"
       @click="emit('filter', null)"
     >
       <span class="label">TOTAL 24h</span>
       <span class="count">{{ summary.total ?? 0 }}</span>
     </div>
     <div class="chart-area">
-      <EventChart :timeseries="timeseries" :active-filter="activeFilter" />
+      <EventChart :timeseries="timeseries" :hidden-classes="hiddenClasses" />
     </div>
   </div>
 </template>

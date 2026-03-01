@@ -1,7 +1,7 @@
 <script setup>
 import { inject } from 'vue'
 
-defineProps({ events: Array, activeFilter: String })
+defineProps({ events: Array, hiddenClasses: Object })
 
 const COLORS = { HIGH: '#e05252', MEDIUM: '#e0a832', LOW: '#4a9eda' }
 const timezone = inject('timezone', { value: 'America/New_York' })
@@ -18,8 +18,8 @@ function fmt(ts) {
 
 <template>
   <div class="feed">
-    <div v-if="activeFilter" class="filter-bar">
-      Showing {{ activeFilter }} only &mdash; click the tile again to clear
+    <div v-if="hiddenClasses.size" class="filter-bar">
+      Hiding: {{ [...hiddenClasses].join(', ') }} &mdash; click tiles to toggle
     </div>
     <div v-if="!events.length" class="empty">No events yet — monitor is running.</div>
     <div v-for="ev in events" :key="ev.id" class="event-row">

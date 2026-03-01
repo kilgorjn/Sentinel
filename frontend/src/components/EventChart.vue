@@ -9,7 +9,7 @@ import {
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Legend)
 
-const props = defineProps({ timeseries: Object, activeFilter: String })
+const props = defineProps({ timeseries: Object, hiddenClasses: Object })
 const timezone = inject('timezone', { value: 'America/New_York' })
 const canvas = ref(null)
 let chart = null
@@ -39,7 +39,7 @@ function buildChart() {
           pointRadius: 2,
           tension: 0.3,
           fill: true,
-          hidden: !!props.activeFilter && props.activeFilter !== 'HIGH',
+          hidden: props.hiddenClasses?.has('HIGH') ?? false,
         },
         {
           label: 'MEDIUM',
@@ -50,7 +50,7 @@ function buildChart() {
           pointRadius: 2,
           tension: 0.3,
           fill: true,
-          hidden: !!props.activeFilter && props.activeFilter !== 'MEDIUM',
+          hidden: props.hiddenClasses?.has('MEDIUM') ?? false,
         },
         {
           label: 'LOW',
@@ -61,7 +61,7 @@ function buildChart() {
           pointRadius: 2,
           tension: 0.3,
           fill: true,
-          hidden: !!props.activeFilter && props.activeFilter !== 'LOW',
+          hidden: props.hiddenClasses?.has('LOW') ?? false,
         },
       ],
     },
@@ -98,7 +98,7 @@ function buildChart() {
 
 onMounted(buildChart)
 watch(() => props.timeseries, buildChart, { deep: true })
-watch(() => props.activeFilter, buildChart)
+watch(() => props.hiddenClasses, buildChart)
 onUnmounted(() => { if (chart) chart.destroy() })
 </script>
 

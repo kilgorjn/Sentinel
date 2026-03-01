@@ -1,5 +1,5 @@
 <script setup>
-import { ref, provide, onMounted, onUnmounted } from 'vue'
+import { ref, computed, provide, onMounted, onUnmounted } from 'vue'
 import SurgeAlert       from './components/SurgeAlert.vue'
 import SummaryBar       from './components/SummaryBar.vue'
 import NarrativeSummary from './components/NarrativeSummary.vue'
@@ -11,22 +11,32 @@ const surge       = ref({ surge_active: false, high_count_in_window: 0, window_m
 const narrative   = ref({ text: '', generated_at: null, surge_active: false })
 const timeseries  = ref({ labels: [], high: [], medium: [], low: [] })
 const lastRefresh = ref(null)
-const activeFilter = ref(null)  // null = show all
+const hiddenClasses = ref(new Set())
 
 const timezone = ref('America/New_York')
 provide('timezone', timezone)
 
+const filteredEvents = computed(() =>
+  hiddenClasses.value.size
+    ? events.value.filter(e => !hiddenClasses.value.has(e.classification))
+    : events.value
+)
+
 function setFilter(cls) {
-  activeFilter.value = activeFilter.value === cls ? null : cls  // click again to clear
-  refresh()
+  if (cls === null) {
+    hiddenClasses.value = new Set()
+    return
+  }
+  const next = new Set(hiddenClasses.value)
+  if (next.has(cls)) next.delete(cls)
+  else next.add(cls)
+  hiddenClasses.value = next
 }
 
 async function refresh() {
   try {
-    const cls = activeFilter.value
-    const evUrl = cls ? `/api/events?limit=50&classification=${cls}` : '/api/events?limit=50'
     const [evRes, sumRes, surRes, narRes, tsRes] = await Promise.all([
-      fetch(evUrl),
+      fetch('/api/events?limit=200'),
       fetch('/api/events/summary'),
       fetch('/api/surge'),
       fetch('/api/events/narrative'),
@@ -63,7 +73,7 @@ onUnmounted(() => clearInterval(timer))
     </span>
   </h1>
   <SurgeAlert        :surge="surge" />
-  <SummaryBar        :summary="summary" :active-filter="activeFilter" :timeseries="timeseries" @filter="setFilter" />
+  <SummaryBar        :summary="summary" :hidden-classes="hiddenClasses" :timeseries="timeseries" @filter="setFilter" />
   <NarrativeSummary  :narrative="narrative" />
-  <EventFeed         :events="events" :active-filter="activeFilter" />
+  <EventFeed         :events="filteredEvents" :hidden-classes="hiddenClasses" />
 </template>
