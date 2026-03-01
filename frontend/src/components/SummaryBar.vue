@@ -50,5 +50,5 @@ function countFor(cls) {
 .total { border-color: #444; }
 .label { display: block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 4px; }
 .count { font-size: 2rem; font-weight: 700; }
-.chart-area { width: 270px; flex-shrink: 0; margin-left: auto; }
+.chart-area { width: 270px; height: 100%; flex-shrink: 0; margin-left: auto; }
 </style>

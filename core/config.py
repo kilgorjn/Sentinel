@@ -5,8 +5,8 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent  # project root (Sentinel/)
 
 # Ollama server
-OLLAMA_URL   = os.getenv("OLLAMA_URL",   "http://jeffs-gaming-pc.lan:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:12b")  # Best accuracy; swap to "qwen3:8b" for speed
+OLLAMA_URL   = os.getenv("OLLAMA_URL",   "").strip() or "http://jeffs-gaming-pc.lan:11434"
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "").strip() or "gemma3:12b"  # Best accuracy; swap to "qwen3:8b" for speed
 OLLAMA_TEMPERATURE = 0.3          # Low = consistent classification
 OLLAMA_TIMEOUT = 60               # Seconds to wait for inference
 
@@ -39,7 +39,7 @@ MARKET_HOURS_ONLY = False     # Set to True to restrict polling to 9:00–17:00 
 MAX_ARTICLE_AGE_HOURS = 24    # Discard articles older than this
 
 # Display timezone — used by the frontend for all timestamps
-DISPLAY_TIMEZONE = os.getenv("DISPLAY_TIMEZONE", "America/New_York")
+DISPLAY_TIMEZONE = os.getenv("DISPLAY_TIMEZONE", "").strip() or "America/New_York"
 
 # Storage — overridable via env vars (used by Docker to point at a named volume)
 DB_PATH  = os.getenv("SENTINEL_DB_PATH",  str(_ROOT / "news_events.db"))

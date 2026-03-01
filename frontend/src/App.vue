@@ -48,7 +48,7 @@ onMounted(async () => {
   const cfgRes = await fetch('/api/config').catch(() => null)
   if (cfgRes?.ok) {
     const cfg = await cfgRes.json()
-    timezone.value = cfg.display_timezone
+    if (cfg.display_timezone) timezone.value = cfg.display_timezone
   }
   refresh()
   timer = setInterval(refresh, 30_000)
