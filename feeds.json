@@ -1,0 +1,28 @@
+{
+  "feeds": [
+    {
+      "id": "cnbc",
+      "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+      "name": "CNBC Top News",
+      "feed_type": "RSS 2.0",
+      "active": true,
+      "added_at": "2026-03-02T01:36:44.426068+00:00"
+    },
+    {
+      "id": "marketwatch",
+      "url": "https://feeds.marketwatch.com/marketwatch/topstories/",
+      "name": "MarketWatch",
+      "feed_type": "RSS 2.0",
+      "active": true,
+      "added_at": "2026-03-02T01:36:44.426190+00:00"
+    },
+    {
+      "id": "bloomberg",
+      "url": "https://feeds.bloomberg.com/markets/news.rss",
+      "name": "Bloomberg Markets",
+      "feed_type": "RSS 2.0",
+      "active": true,
+      "added_at": "2026-03-02T01:36:44.426192+00:00"
+    }
+  ]
+}
