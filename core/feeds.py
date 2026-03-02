@@ -32,9 +32,10 @@ def _parse_time(entry) -> datetime:
 def fetch_rss() -> list[dict]:
     """Fetch all configured RSS feeds and return normalized articles."""
     articles = []
+    agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     for url in config.RSS_FEEDS:
         try:
-            feed = feedparser.parse(url)
+            feed = feedparser.parse(url, agent=agent)
             source = getattr(feed, "feed", {}).get("title", url)
             for entry in getattr(feed, "entries", []):
                 articles.append({

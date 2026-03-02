@@ -119,7 +119,9 @@ def detect_feed_type(feed_url: str) -> dict[str, Any]:
     }
 
     try:
-        feed = feedparser.parse(feed_url)
+        # Use a proper User-Agent to avoid being blocked by servers (e.g., Politico, Bloomberg)
+        agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        feed = feedparser.parse(feed_url, agent=agent)
         version = feed.get("version", "unknown")
         result["version"] = version
 
