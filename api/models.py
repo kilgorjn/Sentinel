@@ -68,3 +68,36 @@ class TimeseriesResponse(BaseModel):
     high: list[int]
     medium: list[int]
     low: list[int]
+
+
+class FeedInfo(BaseModel):
+    """Feed metadata and status."""
+    id: str
+    name: str
+    url: str
+    feed_type: str              # e.g. "RSS 2.0", "Atom 1.0"
+    active: bool
+    added_at: str               # ISO timestamp
+
+
+class FeedValidationResult(BaseModel):
+    """Result of validating a feed URL."""
+    valid: bool
+    feed_type: str              # "RSS 2.0", "Atom 1.0", etc.
+    version: str                # "rss20", "atom10", etc.
+    entry_count: int
+    sample_entries: list[dict]  # List of dicts with title, summary_length, has_timestamp, has_url
+    errors: list[str]
+    warnings: list[str] = []
+
+
+class AddFeedRequest(BaseModel):
+    """Request to add a new feed."""
+    url: str
+    name: Optional[str] = None  # Auto-generated from feed if not provided
+
+
+class AddFeedResponse(BaseModel):
+    """Response after adding a feed."""
+    feed: FeedInfo
+    message: str

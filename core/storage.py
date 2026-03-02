@@ -35,6 +35,15 @@ CREATE TABLE IF NOT EXISTS news_events (
 CREATE INDEX IF NOT EXISTS idx_classification ON news_events(classification);
 CREATE INDEX IF NOT EXISTS idx_created_at     ON news_events(created_at);
 
+CREATE TABLE IF NOT EXISTS feeds (
+    id          TEXT PRIMARY KEY,
+    url         TEXT UNIQUE NOT NULL,
+    name        TEXT NOT NULL,
+    feed_type   TEXT,
+    active      BOOLEAN DEFAULT 1,
+    added_at    TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -167,3 +176,86 @@ def summary() -> list[dict]:
     except Exception as e:
         log.error("Summary query failed: %s", e)
         return []
+
+
+def load_feeds(active_only: bool = True) -> list[dict]:
+    """Load feeds from database. If active_only=True, return only active feeds."""
+    try:
+        conn = _get_conn()
+        if active_only:
+            rows = conn.execute("SELECT id, url, name, feed_type, active, added_at FROM feeds WHERE active = 1").fetchall()
+        else:
+            rows = conn.execute("SELECT id, url, name, feed_type, active, added_at FROM feeds").fetchall()
+        return [
+            {
+                "id": r[0],
+                "url": r[1],
+                "name": r[2],
+                "feed_type": r[3],
+                "active": bool(r[4]),
+                "added_at": r[5],
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        log.error("Failed to load feeds: %s", e)
+        return []
+
+
+def add_feed(feed_id: str, url: str, name: str, feed_type: str) -> bool:
+    """Add a new feed to the database. Returns True on success, False on error (e.g., duplicate URL)."""
+    try:
+        conn = _get_conn()
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """
+            INSERT INTO feeds (id, url, name, feed_type, active, added_at)
+            VALUES (?, ?, ?, ?, 1, ?)
+            """,
+            (feed_id, url, name, feed_type, now),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        # Duplicate URL
+        log.warning("Duplicate feed URL: %s", url)
+        return False
+    except Exception as e:
+        log.error("Failed to add feed: %s", e)
+        return False
+
+
+def delete_feed(feed_id: str) -> bool:
+    """Delete a feed by ID. Returns True if deleted, False if not found."""
+    try:
+        conn = _get_conn()
+        cursor = conn.execute("DELETE FROM feeds WHERE id = ?", (feed_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        log.error("Failed to delete feed: %s", e)
+        return False
+
+
+def toggle_feed(feed_id: str, active: bool) -> dict | None:
+    """Toggle a feed's active status. Returns the updated feed dict or None if not found."""
+    try:
+        conn = _get_conn()
+        conn.execute("UPDATE feeds SET active = ? WHERE id = ?", (active, feed_id))
+        conn.commit()
+
+        # Fetch and return the updated feed
+        row = conn.execute("SELECT id, url, name, feed_type, active, added_at FROM feeds WHERE id = ?", (feed_id,)).fetchone()
+        if row:
+            return {
+                "id": row[0],
+                "url": row[1],
+                "name": row[2],
+                "feed_type": row[3],
+                "active": bool(row[4]),
+                "added_at": row[5],
+            }
+        return None
+    except Exception as e:
+        log.error("Failed to toggle feed: %s", e)
+        return None

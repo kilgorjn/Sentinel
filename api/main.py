@@ -8,11 +8,13 @@ import requests
 from fastapi import FastAPI, APIRouter, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from core import config
 from api.models import (
     NewsEvent, SummaryResponse, ClassificationCount, SentimentBreakdown,
     SurgeResponse, HealthResponse, NarrativeResponse, ConfigResponse, TimeseriesResponse,
+    FeedInfo, FeedValidationResult, AddFeedRequest, AddFeedResponse,
 )
 from api.dependencies import get_db
 
@@ -21,7 +23,7 @@ app = FastAPI(title="Sentinel API", version="1.0", docs_url="/api/docs", openapi
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],   # Vite dev server
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "DELETE", "PATCH"],
     allow_headers=["*"],
 )
 
@@ -253,9 +255,140 @@ def get_narrative():
     return NarrativeResponse(text=text, generated_at=now_str, cached=False, surge_active=surge_active)
 
 
+@router.get("/feeds", response_model=list[FeedInfo])
+def list_feeds():
+    """Get all configured RSS feeds (active only)."""
+    from core import feeds_manager
+    feeds = feeds_manager.load_feeds()
+    return [
+        FeedInfo(
+            id=f["id"],
+            name=f["name"],
+            url=f["url"],
+            feed_type=f.get("feed_type", "Unknown"),
+            active=f.get("active", True),
+            added_at=f.get("added_at", ""),
+        )
+        for f in feeds
+    ]
+
+
+@router.post("/feeds/validate", response_model=FeedValidationResult)
+def validate_feed(request: AddFeedRequest):
+    """Test a feed URL and detect its type.
+
+    Auto-detects feed format (RSS 2.0, Atom 1.0, etc.) and validates
+    it has required fields (title, summary, link, timestamp).
+    """
+    from core import feed_handlers
+
+    result = feed_handlers.detect_feed_type(request.url)
+
+    # Convert handler object to None for serialization
+    handler = result.pop("handler")
+    result["warnings"] = []
+
+    if result["valid"] and not (result.get("sample_entries") and
+                                any(e["summary_length"] > 100 for e in result["sample_entries"])):
+        result["warnings"].append(
+            "Feed entries have short or missing summaries. "
+            "Classifier will have limited context."
+        )
+
+    return FeedValidationResult(**result)
+
+
+@router.post("/feeds", response_model=AddFeedResponse)
+def add_feed(request: AddFeedRequest):
+    """Add a new RSS feed after validating it."""
+    from core import feed_handlers, feeds_manager
+
+    # Validate the feed first
+    validation = feed_handlers.detect_feed_type(request.url)
+
+    if not validation["valid"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Feed validation failed: {'; '.join(validation['errors'])}",
+        )
+
+    # Add to database
+    feed_name = request.name or validation.get("feed_type", "Unknown Feed")
+    feed_type = validation.get("feed_type", "Unknown")
+
+    try:
+        new_feed = feeds_manager.add_feed(
+            url=request.url,
+            name=feed_name,
+            feed_type=feed_type,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    return AddFeedResponse(
+        feed=FeedInfo(
+            id=new_feed["id"],
+            name=new_feed["name"],
+            url=new_feed["url"],
+            feed_type=new_feed.get("feed_type", "Unknown"),
+            active=new_feed.get("active", True),
+            added_at=new_feed.get("added_at", ""),
+        ),
+        message=f"Feed added: {feed_name}",
+    )
+
+
+@router.delete("/feeds/{feed_id}")
+def delete_feed(feed_id: str):
+    """Remove a feed by ID."""
+    from core import feeds_manager
+
+    success = feeds_manager.delete_feed(feed_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Feed {feed_id} not found")
+
+    return {"message": f"Feed {feed_id} deleted"}
+
+
+@router.patch("/feeds/{feed_id}")
+def toggle_feed(feed_id: str, active: bool = Query(..., description="Enable or disable feed")):
+    """Enable/disable a feed."""
+    from core import feeds_manager
+
+    feed = feeds_manager.toggle_feed(feed_id, active)
+    if not feed:
+        raise HTTPException(status_code=404, detail=f"Feed {feed_id} not found")
+
+    return {
+        "feed_id": feed_id,
+        "active": active,
+        "message": f"Feed {'enabled' if active else 'disabled'}",
+    }
+
+
 app.include_router(router)
 
-# Serve the built Vue frontend — must be mounted LAST so API routes take priority
+# Serve the built Vue frontend with SPA fallback
 _DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+_INDEX = _DIST / "index.html"
+
 if _DIST.exists():
-    app.mount("/", StaticFiles(directory=_DIST, html=True), name="frontend")
+    # Catch-all route for SPA: serve index.html for all non-API routes
+    # This allows Vue Router to handle routing on the client side
+    @app.get("/{path:path}")
+    async def serve_spa(path: str):
+        """Serve static files or fall back to index.html for SPA routing."""
+        # Don't intercept API calls
+        if path.startswith("api/"):
+            return HTTPException(status_code=404, detail="Not found")
+
+        # Try to serve static file first (CSS, JS, images, etc.)
+        file_path = _DIST / path
+        if file_path.is_file():
+            return FileResponse(file_path)
+
+        # Fall back to index.html for client-side routing
+        if _INDEX.exists():
+            return FileResponse(_INDEX)
+
+        return HTTPException(status_code=404, detail="Not found")
