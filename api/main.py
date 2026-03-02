@@ -22,9 +22,16 @@ app = FastAPI(title="Sentinel API", version="1.0", docs_url="/api/docs", openapi
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],   # Vite dev server
-    allow_methods=["GET", "POST", "DELETE", "PATCH"],
+    allow_origins=[
+        "http://localhost:5173",          # Vite dev server
+        "http://localhost:5500",          # VSCode Live Server
+        "http://127.0.0.1:5500",          # VSCode Live Server (alternative)
+        "http://localhost:8000",          # Local API
+        "http://docker-apps.lan:8082",    # Docker apps server
+    ],
+    allow_methods=["GET", "POST", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
 router = APIRouter(prefix="/api")

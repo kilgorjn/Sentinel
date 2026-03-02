@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sentiment Chart Examples</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0d0d0d;
+      color: #e0e0e0;
+      font-family: system-ui, sans-serif;
+      padding: 20px;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+    h1 { margin-bottom: 30px; font-size: 1.8rem; }
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+      gap: 30px;
+      margin-bottom: 40px;
+    }
+    .chart-box {
+      background: #1a1a1a;
+      border: 1px solid #222;
+      border-radius: 8px;
+      padding: 20px;
+    }
+    .chart-box h2 {
+      font-size: 1.1rem;
+      margin-bottom: 10px;
+      color: #aaa;
+    }
+    .chart-box p {
+      font-size: 0.9rem;
+      color: #666;
+      margin-bottom: 15px;
+      line-height: 1.5;
+    }
+    canvas { max-height: 400px; }
+    .notes {
+      background: #111;
+      border-left: 3px solid #e0a832;
+      padding: 15px;
+      margin-top: 20px;
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+    .color-legend {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 15px;
+      font-size: 0.9rem;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .legend-color {
+      width: 20px;
+      height: 20px;
+      border-radius: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Sentiment Over Time - Chart Options</h1>
+
+    <div class="charts-grid">
+      <!-- Option 1: Stacked Bar Chart (RECOMMENDED) -->
+      <div class="chart-box">
+        <h2>📊 Stacked Bar Chart (RECOMMENDED)</h2>
+        <p>Shows sentiment composition per hour. Easy to see how positive/negative/neutral mix changes over the day. Good for comparing proportions and volumes.</p>
+        <div class="color-legend">
+          <div class="legend-item">
+            <div class="legend-color" style="background: #4CAF50;"></div>
+            <span>POSITIVE</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #e05252;"></div>
+            <span>NEGATIVE</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #666;"></div>
+            <span>NEUTRAL</span>
+          </div>
+        </div>
+        <canvas id="stackedBarChart"></canvas>
+        <div class="notes">
+          ✓ Clear composition per hour | ✓ Easy comparisons | ✓ Different from line chart | ✓ Matches existing design
+        </div>
+      </div>
+
+      <!-- Option 2: Stacked Area Chart -->
+      <div class="chart-box">
+        <h2>📈 Stacked Area Chart</h2>
+        <p>Shows sentiment trends and volume over time. Similar to bar chart but with continuous lines. Emphasizes trend flow.</p>
+        <div class="color-legend">
+          <div class="legend-item">
+            <div class="legend-color" style="background: #4CAF50;"></div>
+            <span>POSITIVE</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #e05252;"></div>
+            <span>NEGATIVE</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #666;"></div>
+            <span>NEUTRAL</span>
+          </div>
+        </div>
+        <canvas id="stackedAreaChart"></canvas>
+        <div class="notes">
+          ✓ Shows trends | ✓ Continuous flow | ~ Similar to line chart above | × Harder to read exact values
+        </div>
+      </div>
+
+      <!-- Option 3: Grouped Bar Chart -->
+      <div class="chart-box">
+        <h2>📊 Grouped Bar Chart</h2>
+        <p>Shows sentiment side-by-side for easy direct comparison. Takes more horizontal space but very clear.</p>
+        <div class="color-legend">
+          <div class="legend-item">
+            <div class="legend-color" style="background: #4CAF50;"></div>
+            <span>POSITIVE</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #e05252;"></div>
+            <span>NEGATIVE</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #666;"></div>
+            <span>NEUTRAL</span>
+          </div>
+        </div>
+        <canvas id="groupedBarChart"></canvas>
+        <div class="notes">
+          ✓ Direct comparisons | ✓ Clear values | ~ Takes more space horizontally | ~ Less elegant than stacked
+        </div>
+      </div>
+
+      <!-- Option 5: NET FORCE CHART (Weighted Momentum) -->
+      <div class="chart-box">
+        <h2>⚛️ Net Force Chart (Weighted Sentiment Momentum)</h2>
+        <p><strong>What this answers:</strong> Is sentiment predominantly positive or negative, weighted by event importance (HIGH=3x, MEDIUM=2x, LOW=1x)?</p>
+        <div class="color-legend">
+          <div class="legend-item">
+            <div class="legend-color" style="background: #4CAF50;"></div>
+            <span>Positive Force (Bullish)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #e05252;"></div>
+            <span>Negative Force (Bearish)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #555;"></div>
+            <span>Event Volume (Mass)</span>
+          </div>
+        </div>
+        <canvas id="momentumChart"></canvas>
+        <div class="notes">
+          <strong>Left axis (bars):</strong> Total weighted event volume<br>
+          Example: 1 HIGH + 2 MEDIUM + 3 LOW = (1×3)+(2×2)+(3×1) = 10 mass units<br>
+          <br>
+          <strong>Right axis (line):</strong> Net directional pressure from -1 to +1<br>
+          • <strong>+1</strong> = all positive sentiment<br>
+          • <strong>0</strong> = balanced (equal positive/negative weighted events)<br>
+          • <strong>-1</strong> = all negative sentiment<br>
+          <br>
+          <strong>Line color:</strong> Green when >+0.05 (bullish), Red when <-0.05 (bearish)<br>
+          <strong>Steepness:</strong> Faster swings = high velocity (sentiment changing rapidly)<br>
+          <br>
+          ✓ Correlates with trading activity spikes | ✓ Weights HIGH events heavily | ✓ Shows sentiment direction
+        </div>
+      </div>
+
+      <!-- Option 4: 100% Stacked Bar (Percentage) -->
+      <div class="chart-box">
+        <h2>📊 100% Stacked Bar (Sentiment Mix %)</h2>
+        <p>Shows sentiment as percentage composition. Useful to see sentiment "mood" independent of volume.</p>
+        <div class="color-legend">
+          <div class="legend-item">
+            <div class="legend-color" style="background: #4CAF50;"></div>
+            <span>POSITIVE %</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #e05252;"></div>
+            <span>NEGATIVE %</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #666;"></div>
+            <span>NEUTRAL %</span>
+          </div>
+        </div>
+        <canvas id="percentStackedChart"></canvas>
+        <div class="notes">
+          ✓ Shows sentiment "mood" | ✓ Normalized view | ~ Loses volume information | ~ Less intuitive than stacked
+        </div>
+      </div>
+    </div>
+
+    <div style="background: #111; border: 1px solid #222; border-radius: 8px; padding: 20px; margin-top: 20px;">
+      <h2 style="margin-bottom: 15px;">Recommendations</h2>
+      <p style="color: #999; line-height: 1.8;">
+        <strong>For Dashboard Overview: Stacked Bar Chart</strong><br>
+        • Shows both volume AND composition in one chart<br>
+        • Easy to compare across hours (each bar is a time period)<br>
+        • Visually different from the line chart above it<br>
+        • Matches the dark theme and existing design language<br>
+        • Sentiment proportions are immediately visible<br>
+        <br>
+        <strong>For Financial Momentum: Net Force Chart ⚛️</strong><br>
+        • <strong>Answers: "Is sentiment bullish or bearish, weighted by importance?"</strong><br>
+        • Background bars = total weighted event volume (mass)<br>
+        • Foreground line = net sentiment direction (-1 to +1)<br>
+        • HIGH-classified events count 3x, MEDIUM 2x, LOW 1x<br>
+        • Steep line = sentiment swinging fast (high velocity)<br>
+        • Useful for correlation: when Net Force spikes, check if login volume also spiked in Splunk<br>
+        <br>
+        <strong>How to read it:</strong><br>
+        • <strong>Net Force = +0.8</strong> → strongly positive sentiment (bullish), expected buying<br>
+        • <strong>Net Force = -0.7</strong> → strongly negative sentiment (bearish), expected selling<br>
+        • <strong>Net Force = 0</strong> → balanced sentiment, no clear direction<br>
+        • <strong>Steep upward slope</strong> → sentiment rapidly improving (momentum building)<br>
+        • <strong>Steep downward slope</strong> → sentiment rapidly deteriorating (selling pressure building)
+      </p>
+    </div>
+  </div>
+
+  <script>
+    // Fetch data from API and populate charts
+    async function loadCharts() {
+      try {
+        const response = await fetch('http://localhost:8000/api/events?limit=200', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          mode: 'cors',
+          credentials: 'omit',
+        });
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
+        }
+        const events = await response.json();
+
+        // Group events by hour and sentiment
+        const hourlyData = {};
+        const now = new Date();
+
+        // Initialize 24 hours with zeros
+        for (let i = 23; i >= 0; i--) {
+          const date = new Date(now);
+          date.setHours(date.getHours() - i);
+          const hour = date.getHours().toString().padStart(2, '0') + ':00';
+          hourlyData[hour] = { POSITIVE: 0, NEGATIVE: 0, NEUTRAL: 0 };
+        }
+
+        // Process events
+        events.forEach(event => {
+          const timestamp = new Date(event.published_at);
+          const hour = timestamp.getHours().toString().padStart(2, '0') + ':00';
+          const sentiment = event.sentiment || 'NEUTRAL';
+
+          if (hourlyData[hour]) {
+            if (sentiment === 'POSITIVE') hourlyData[hour].POSITIVE++;
+            else if (sentiment === 'NEGATIVE') hourlyData[hour].NEGATIVE++;
+            else hourlyData[hour].NEUTRAL++;
+          }
+        });
+
+        // Extract sorted labels and data
+        const labels = Object.keys(hourlyData).sort();
+        const positive = labels.map(h => hourlyData[h].POSITIVE);
+        const negative = labels.map(h => hourlyData[h].NEGATIVE);
+        const neutral = labels.map(h => hourlyData[h].NEUTRAL);
+
+        console.log('Loaded data:', { labels, positive, negative, neutral, totalEvents: events.length });
+
+        // Build all charts with real data
+        buildCharts(labels, positive, negative, neutral);
+      } catch (error) {
+        console.error('Failed to load data:', error);
+        const errorMsg = document.createElement('div');
+        errorMsg.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #e05252; padding: 15px; border-radius: 4px; color: white; z-index: 9999; max-width: 400px;';
+        errorMsg.innerHTML = `<strong>⚠️ API Error:</strong><br>${error.message}<br><br>Using sample data instead.<br><code style="font-size: 0.85em;">http://localhost:8000/api/events?limit=200</code>`;
+        document.body.appendChild(errorMsg);
+        setTimeout(() => errorMsg.remove(), 10000);
+
+        // Fallback to sample data
+        const sampleLabels = [
+          '00:00', '01:00', '02:00', '03:00', '04:00', '05:00',
+          '06:00', '07:00', '08:00', '09:00', '10:00', '11:00',
+          '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
+          '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
+        ];
+        const positive = [2, 1, 0, 1, 2, 3, 5, 8, 12, 15, 18, 22, 25, 28, 26, 24, 20, 18, 15, 12, 10, 8, 5, 3];
+        const negative = [1, 0, 0, 1, 2, 2, 3, 4, 6, 8, 10, 12, 15, 18, 20, 19, 17, 16, 14, 12, 10, 8, 6, 4];
+        const neutral = [5, 3, 2, 3, 4, 5, 7, 9, 12, 14, 16, 18, 20, 22, 18, 16, 14, 12, 11, 10, 8, 6, 4, 3];
+        buildCharts(sampleLabels, positive, negative, neutral);
+      }
+    }
+
+    function buildCharts(labels, positive, negative, neutral) {
+      // Backend weights: HIGH=3, MEDIUM=2, LOW=1
+      // We don't have individual classifications in the aggregated data, so estimate the split
+      function estimateWeightedSentiment(posCount, negCount) {
+        // Assume HIGH=25%, MEDIUM=40%, LOW=35% distribution
+        const highRatio = 0.25, mediumRatio = 0.40, lowRatio = 0.35;
+        const highWeight = 3, mediumWeight = 2, lowWeight = 1;
+
+        const weightedPos = (posCount * highRatio * highWeight) + (posCount * mediumRatio * mediumWeight) + (posCount * lowRatio * lowWeight);
+        const weightedNeg = (negCount * highRatio * highWeight) + (negCount * mediumRatio * mediumWeight) + (negCount * lowRatio * lowWeight);
+        const totalMass = weightedPos + weightedNeg;
+
+        return { weightedPos, weightedNeg, totalMass };
+      }
+
+      // Helper: Calculate weighted momentum metrics
+      function calculateWeightedMomentum() {
+        const netForce = [];      // (-1 to +1) showing sentiment direction
+        const mass = [];          // Total weighted event count
+        const velocity = [];      // Rate of change of force
+
+        for (let i = 0; i < labels.length; i++) {
+          const { weightedPos, weightedNeg, totalMass } = estimateWeightedSentiment(positive[i], negative[i]);
+
+          // Net Force: -1 (all negative) to +1 (all positive)
+          // Tells you: which direction is sentiment pointing?
+          const force = totalMass > 0 ? (weightedPos - weightedNeg) / totalMass : 0;
+
+          // Velocity: rate of change from previous hour
+          // Tells you: how fast is sentiment swinging?
+          const v = i > 0 ? (force - netForce[i-1]) : 0;
+
+          netForce.push(force);
+          mass.push(totalMass);
+          velocity.push(v);
+        }
+        return { netForce, mass, velocity };
+      }
+
+      const { netForce, mass, velocity } = calculateWeightedMomentum();
+
+      // 0. Net Force Chart (showing weighted sentiment momentum)
+      new Chart(document.getElementById('momentumChart'), {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            // Background: Total weighted event volume (mass)
+            // HIGH events count 3x, MEDIUM 2x, LOW 1x
+            {
+              label: 'Weighted Event Volume (Mass)',
+              data: mass,
+              type: 'bar',
+              backgroundColor: 'rgba(85, 85, 85, 0.15)',
+              borderColor: 'rgba(85, 85, 85, 0)',
+              borderWidth: 0,
+              borderRadius: 2,
+              yAxisID: 'y1',
+              order: 2,
+            },
+            // Foreground: Net Force line (sentiment direction and strength)
+            {
+              label: 'Net Force (Weighted Sentiment)',
+              data: netForce,
+              type: 'line',
+              borderColor: '#888',
+              borderWidth: 3,
+              tension: 0.4,
+              cubicInterpolationMode: 'monotone',
+              fill: true,
+              backgroundColor: (ctx) => {
+                const value = ctx.dataset.data[ctx.dataIndex];
+                if (value > 0.05) return 'rgba(76, 175, 80, 0.15)';   // Positive: light green
+                if (value < -0.05) return 'rgba(224, 82, 82, 0.15)';  // Negative: light red
+                return 'rgba(136, 136, 136, 0.08)';                  // Neutral: gray
+              },
+              pointRadius: 0,
+              pointHoverRadius: 6,
+              yAxisID: 'y2',
+              order: 1,
+              segment: {
+                borderColor: (ctx) => {
+                  const value = ctx.p1.parsed.y;
+                  if (value > 0.05) return '#4CAF50';   // Green when positive
+                  if (value < -0.05) return '#e05252';  // Red when negative
+                  return '#888';                        // Gray when neutral
+                }
+              }
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { display: true, position: 'top' },
+            tooltip: {
+              backgroundColor: '#1a1a1a',
+              borderColor: '#333',
+              borderWidth: 1,
+              titleColor: '#ccc',
+              bodyColor: '#aaa',
+              callbacks: {
+                label: function(context) {
+                  if (context.dataset.label === 'Net Force (Weighted Sentiment)') {
+                    const val = context.parsed.y.toFixed(2);
+                    let dir = '→ Neutral';
+                    if (context.parsed.y > 0.1) dir = '↗ Positive (Bullish)';
+                    else if (context.parsed.y < -0.1) dir = '↘ Negative (Bearish)';
+                    return 'Net Force: ' + val + ' | ' + dir;
+                  }
+                  return context.dataset.label + ': ' + Math.round(context.parsed.y);
+                }
+              }
+            },
+          },
+          scales: {
+            x: {
+              ticks: { color: '#555', font: { size: 9 } },
+              grid: { color: '#1a1a1a' },
+            },
+            y1: {
+              type: 'linear',
+              position: 'left',
+              title: { display: true, text: 'Weighted Mass (HIGH×3 + MEDIUM×2 + LOW×1)', color: '#666', font: { size: 10 } },
+              ticks: { color: '#555' },
+              grid: { color: '#1a1a1a' },
+            },
+            y2: {
+              type: 'linear',
+              position: 'right',
+              title: { display: true, text: 'Net Force (-1=Bearish to +1=Bullish)', color: '#666', font: { size: 10 } },
+              min: -1,
+              max: 1,
+              ticks: { color: '#555', callback: function(v) { return v.toFixed(1); } },
+              grid: { drawOnChartArea: false },
+            },
+          },
+        },
+      });
+
+      // 1. Stacked Bar Chart (RECOMMENDED)
+      new Chart(document.getElementById('stackedBarChart'), {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: 'POSITIVE',
+              data: positive,
+              backgroundColor: '#4CAF50',
+              borderRadius: 2,
+            },
+            {
+              label: 'NEGATIVE',
+              data: negative,
+              backgroundColor: '#e05252',
+              borderRadius: 2,
+            },
+            {
+              label: 'NEUTRAL',
+              data: neutral,
+              backgroundColor: '#666',
+              borderRadius: 2,
+            },
+          ],
+        },
+        options: {
+          indexAxis: 'x',
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#1a1a1a',
+              borderColor: '#333',
+              borderWidth: 1,
+              titleColor: '#ccc',
+              bodyColor: '#aaa',
+            },
+          },
+          scales: {
+            x: { stacked: true, ticks: { color: '#555', font: { size: 9 } }, grid: { color: '#1a1a1a' } },
+            y: { stacked: true, ticks: { color: '#555' }, grid: { color: '#1a1a1a' } },
+          },
+        },
+      });
+
+      // 2. Stacked Area Chart
+      new Chart(document.getElementById('stackedAreaChart'), {
+        type: 'line',
+        data: {
+          labels: labels,
+        datasets: [
+          {
+            label: 'POSITIVE',
+            data: positive,
+            borderColor: '#4CAF50',
+            backgroundColor: 'rgba(76, 175, 80, 0.3)',
+            fill: true,
+            borderWidth: 2,
+            tension: 0.6,
+            cubicInterpolationMode: 'monotone',
+          },
+          {
+            label: 'NEGATIVE',
+            data: negative,
+            borderColor: '#e05252',
+            backgroundColor: 'rgba(224, 82, 82, 0.3)',
+            fill: true,
+            borderWidth: 2,
+            tension: 0.6,
+            cubicInterpolationMode: 'monotone',
+          },
+          {
+            label: 'NEUTRAL',
+            data: neutral,
+            borderColor: '#666',
+            backgroundColor: 'rgba(102, 102, 102, 0.3)',
+            fill: true,
+            borderWidth: 2,
+            tension: 0.6,
+            cubicInterpolationMode: 'monotone',
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#1a1a1a',
+            borderColor: '#333',
+            borderWidth: 1,
+            titleColor: '#ccc',
+            bodyColor: '#aaa',
+          },
+        },
+        scales: {
+          x: { ticks: { color: '#555', font: { size: 9 } }, grid: { color: '#1a1a1a' } },
+          y: { ticks: { color: '#555' }, grid: { color: '#1a1a1a' }, beginAtZero: true },
+        },
+      },
+    });
+
+    // 3. Grouped Bar Chart
+    new Chart(document.getElementById('groupedBarChart'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'POSITIVE',
+            data: positive,
+            backgroundColor: '#4CAF50',
+            borderRadius: 2,
+          },
+          {
+            label: 'NEGATIVE',
+            data: negative,
+            backgroundColor: '#e05252',
+            borderRadius: 2,
+          },
+          {
+            label: 'NEUTRAL',
+            data: neutral,
+            backgroundColor: '#666',
+            borderRadius: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#1a1a1a',
+            borderColor: '#333',
+            borderWidth: 1,
+            titleColor: '#ccc',
+            bodyColor: '#aaa',
+          },
+        },
+        scales: {
+          x: { ticks: { color: '#555', font: { size: 9 } }, grid: { color: '#1a1a1a' } },
+          y: { ticks: { color: '#555' }, grid: { color: '#1a1a1a' } },
+        },
+      },
+    });
+
+      // 4. 100% Stacked Bar (Percentage)
+      function calculatePercentages() {
+        const percentPos = [];
+        const percentNeg = [];
+        const percentNeu = [];
+
+        for (let i = 0; i < positive.length; i++) {
+          const total = positive[i] + negative[i] + neutral[i];
+          percentPos.push(total > 0 ? Math.round((positive[i] / total) * 100) : 0);
+          percentNeg.push(total > 0 ? Math.round((negative[i] / total) * 100) : 0);
+          percentNeu.push(total > 0 ? Math.round((neutral[i] / total) * 100) : 0);
+        }
+        return { percentPos, percentNeg, percentNeu };
+      }
+
+      const { percentPos, percentNeg, percentNeu } = calculatePercentages();
+
+      new Chart(document.getElementById('percentStackedChart'), {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: 'POSITIVE %',
+              data: percentPos,
+              backgroundColor: '#4CAF50',
+              borderRadius: 2,
+            },
+            {
+              label: 'NEGATIVE %',
+              data: percentNeg,
+              backgroundColor: '#e05252',
+              borderRadius: 2,
+            },
+            {
+              label: 'NEUTRAL %',
+              data: percentNeu,
+              backgroundColor: '#666',
+              borderRadius: 2,
+            },
+          ],
+        },
+        options: {
+          indexAxis: 'x',
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#1a1a1a',
+              borderColor: '#333',
+              borderWidth: 1,
+              titleColor: '#ccc',
+              bodyColor: '#aaa',
+              callbacks: {
+                label: function(context) {
+                  return context.dataset.label + ': ' + context.parsed.y + '%';
+                }
+              }
+            },
+          },
+          scales: {
+            x: { stacked: true, ticks: { color: '#555', font: { size: 9 } }, grid: { color: '#1a1a1a' }, max: 100 },
+            y: { stacked: true, ticks: { color: '#555' }, grid: { color: '#1a1a1a' } },
+          },
+        },
+      });
+    }
+
+    // Load charts with real data
+    loadCharts();
+  </script>
+</body>
+</html>
