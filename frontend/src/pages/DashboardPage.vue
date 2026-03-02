@@ -9,7 +9,8 @@ const events      = ref([])
 const summary     = ref({ counts: [], total: 0, overall_sentiment: null, overall_sentiment_score: 0 })
 const surge       = ref({ surge_active: false, high_count_in_window: 0, window_minutes: 30 })
 const narrative   = ref({ text: '', generated_at: null, surge_active: false })
-const timeseries  = ref({ labels: [], high: [], medium: [], low: [] })
+const timeseries          = ref({ labels: [], high: [], medium: [], low: [] })
+const sentimentTimeseries = ref({ labels: [], scores: [] })
 const lastRefresh = ref(null)
 const hiddenClasses = ref(new Set())
 
@@ -35,18 +36,20 @@ function setFilter(cls) {
 
 async function refresh() {
   try {
-    const [evRes, sumRes, surRes, narRes, tsRes] = await Promise.all([
+    const [evRes, sumRes, surRes, narRes, tsRes, stRes] = await Promise.all([
       fetch('/api/events?limit=200'),
       fetch('/api/events/summary'),
       fetch('/api/surge'),
       fetch('/api/events/narrative'),
       fetch('/api/events/timeseries'),
+      fetch('/api/events/sentiment-timeseries'),
     ])
-    events.value     = await evRes.json()
-    summary.value    = await sumRes.json()
-    surge.value      = await surRes.json()
-    narrative.value  = await narRes.json()
-    timeseries.value = await tsRes.json()
+    events.value             = await evRes.json()
+    summary.value            = await sumRes.json()
+    surge.value              = await surRes.json()
+    narrative.value          = await narRes.json()
+    timeseries.value         = await tsRes.json()
+    sentimentTimeseries.value = await stRes.json()
     lastRefresh.value = new Date().toLocaleTimeString('en-US', { timeZone: timezone.value, hour: '2-digit', minute: '2-digit' }) + ' ET'
   } catch (e) {
     console.error('Refresh failed:', e)
@@ -73,7 +76,7 @@ onUnmounted(() => clearInterval(timer))
     </span>
   </h1>
   <SurgeAlert        :surge="surge" />
-  <SummaryBar        :summary="summary" :hidden-classes="hiddenClasses" :timeseries="timeseries" @filter="setFilter" />
+  <SummaryBar        :summary="summary" :hidden-classes="hiddenClasses" :timeseries="timeseries" :sentiment-timeseries="sentimentTimeseries" @filter="setFilter" />
   <NarrativeSummary  :narrative="narrative" />
   <EventFeed         :events="filteredEvents" :hidden-classes="hiddenClasses" />
 </template>

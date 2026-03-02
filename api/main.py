@@ -13,7 +13,8 @@ from fastapi.responses import FileResponse
 from core import config
 from api.models import (
     NewsEvent, SummaryResponse, ClassificationCount, SentimentBreakdown,
-    SurgeResponse, HealthResponse, NarrativeResponse, ConfigResponse, TimeseriesResponse,
+    SurgeResponse, HealthResponse, NarrativeResponse, ConfigResponse,
+    TimeseriesResponse, SentimentTimeseriesResponse,
     FeedInfo, FeedValidationResult, AddFeedRequest, AddFeedResponse,
 )
 from api.dependencies import get_db
@@ -193,6 +194,48 @@ def get_timeseries(hours: int = Query(24, ge=1, le=168)):
     low    = [data.get((b, "LOW"),    0) for b in buckets]
 
     return TimeseriesResponse(labels=buckets, high=high, medium=medium, low=low)
+
+
+@router.get("/events/sentiment-timeseries", response_model=SentimentTimeseriesResponse)
+def get_sentiment_timeseries(hours: int = Query(24, ge=1, le=168)):
+    """Hourly weighted sentiment scores for the last N hours."""
+    from collections import defaultdict
+    conn = get_db()
+
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    buckets = [(now - timedelta(hours=i)).strftime("%Y-%m-%dT%H:00:00Z") for i in range(hours - 1, -1, -1)]
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    rows = conn.execute(
+        """
+        SELECT strftime('%Y-%m-%dT%H:00:00', published_at) AS bucket,
+               classification,
+               COALESCE(sentiment, 'NEUTRAL') AS sentiment,
+               COUNT(*) AS cnt
+        FROM news_events
+        WHERE published_at >= ?
+        GROUP BY bucket, classification, sentiment
+        ORDER BY bucket ASC
+        """,
+        (cutoff,),
+    ).fetchall()
+
+    bucket_weighted: dict = defaultdict(float)
+    bucket_total: dict = defaultdict(float)
+    for row in rows:
+        bucket_key = row[0] + "Z"
+        cls  = row[1]
+        sent = (row[2] or "NEUTRAL").upper()
+        cnt  = row[3]
+        w = _CLS_WEIGHT.get(cls, 1)
+        bucket_weighted[bucket_key] += w * _SENT_SCORE.get(sent, 0) * cnt
+        bucket_total[bucket_key]    += w * cnt
+
+    scores = [
+        round(bucket_weighted[b] / bucket_total[b], 3) if bucket_total[b] > 0 else None
+        for b in buckets
+    ]
+    return SentimentTimeseriesResponse(labels=buckets, scores=scores)
 
 
 @router.get("/config", response_model=ConfigResponse)

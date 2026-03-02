@@ -70,6 +70,11 @@ class TimeseriesResponse(BaseModel):
     low: list[int]
 
 
+class SentimentTimeseriesResponse(BaseModel):
+    labels: list[str]                   # ISO hour bucket strings
+    scores: list[Optional[float]]       # weighted sentiment score [-1, 1] or None for empty hours
+
+
 class FeedInfo(BaseModel):
     """Feed metadata and status."""
     id: str

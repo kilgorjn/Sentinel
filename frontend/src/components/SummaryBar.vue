@@ -1,7 +1,8 @@
 <script setup>
-import EventChart from './EventChart.vue'
+import EventChart     from './EventChart.vue'
+import SentimentChart from './SentimentChart.vue'
 
-const props = defineProps({ summary: Object, hiddenClasses: Object, timeseries: Object })
+const props = defineProps({ summary: Object, hiddenClasses: Object, timeseries: Object, sentimentTimeseries: Object })
 const emit  = defineEmits(['filter'])
 
 const COLORS = { HIGH: '#e05252', MEDIUM: '#e0a832', LOW: '#4a9eda' }
@@ -121,8 +122,19 @@ function scoreBarStyle() {
       </div>
     </div>
 
-    <div class="chart-area">
-      <EventChart :timeseries="timeseries" :hidden-classes="hiddenClasses" />
+    <div class="charts-group">
+      <div class="chart-panel">
+        <span class="chart-label">Events / hr</span>
+        <div class="chart-area">
+          <EventChart :timeseries="timeseries" :hidden-classes="hiddenClasses" />
+        </div>
+      </div>
+      <div class="chart-panel">
+        <span class="chart-label">Sentiment / hr</span>
+        <div class="chart-area">
+          <SentimentChart :sentiment-timeseries="sentimentTimeseries" />
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -177,5 +189,9 @@ function scoreBarStyle() {
 .tt-row { display: flex; gap: 10px; align-items: center; margin-bottom: 3px; }
 .tt-cls { color: #555; min-width: 72px; font-size: 0.68rem; }
 
-.chart-area { width: 270px; height: 100%; flex-shrink: 0; margin-left: auto; }
+.charts-group { display: flex; gap: 10px; margin-left: auto; flex-shrink: 0; align-self: stretch; }
+.chart-panel { display: flex; flex-direction: column; width: 210px; flex-shrink: 0; }
+.chart-label { font-size: 0.58rem; color: #444; text-transform: uppercase;
+               letter-spacing: 0.08em; margin-bottom: 3px; text-align: center; }
+.chart-area { flex: 1; min-height: 0; }
 </style>
