@@ -10,12 +10,11 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "").strip() or "gemma3:12b"  # Best acc
 OLLAMA_TEMPERATURE = 0.3          # Low = consistent classification
 OLLAMA_TIMEOUT = 60               # Seconds to wait for inference
 
-# RSS feeds (free, no API key required)
+# RSS feeds — verified high-quality sources with good summaries (no paywalls)
 RSS_FEEDS = [
-    "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US",  # Yahoo Finance S&P
-    "https://www.cnbc.com/id/100003114/device/rss/rss.html",   # CNBC Top News
-    "https://feeds.npr.org/1006/rss.xml",                      # NPR Business
-    "https://seekingalpha.com/market_currents.xml",            # Seeking Alpha
+    "https://www.cnbc.com/id/100003114/device/rss/rss.html",      # CNBC Top News (30 articles/fetch, ~134 char summaries)
+    "https://feeds.marketwatch.com/marketwatch/topstories/",      # MarketWatch (10 articles/fetch, ~241 char summaries)
+    "https://feeds.bloomberg.com/markets/news.rss",               # Bloomberg Markets (30 articles/fetch, ~172 char summaries)
 ]
 
 # NewsAPI (optional — set to None to disable)
