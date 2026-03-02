@@ -68,14 +68,14 @@ _SENT_THRESH  = 0.10   # score must exceed ±10% to be called directional
 
 
 @router.get("/events/summary", response_model=SummaryResponse)
-def get_summary():
+def get_summary(hours: int = Query(24, ge=1, le=720)):
     """Classification counts with per-tier sentiment breakdown and weighted overall sentiment."""
     conn = get_db()
     rows = conn.execute(
-        """
+        f"""
         SELECT classification, COALESCE(sentiment, 'NEUTRAL') AS sentiment, COUNT(*) AS cnt
         FROM news_events
-        WHERE created_at >= datetime('now', '-24 hours')
+        WHERE created_at >= datetime('now', '-{hours} hours')
         GROUP BY classification, sentiment
         """
     ).fetchall()
@@ -119,7 +119,7 @@ def get_summary():
         overall = "NEUTRAL"
 
     return SummaryResponse(
-        window_hours=24,
+        window_hours=hours,
         counts=counts,
         total=sum(c.count for c in counts),
         overall_sentiment=overall,
@@ -162,7 +162,7 @@ def get_health():
 
 
 @router.get("/events/timeseries", response_model=TimeseriesResponse)
-def get_timeseries(hours: int = Query(24, ge=1, le=168)):
+def get_timeseries(hours: int = Query(24, ge=1, le=720)):
     """Hourly event counts per classification for the last N hours."""
     conn = get_db()
 
@@ -197,7 +197,7 @@ def get_timeseries(hours: int = Query(24, ge=1, le=168)):
 
 
 @router.get("/events/sentiment-timeseries", response_model=SentimentTimeseriesResponse)
-def get_sentiment_timeseries(hours: int = Query(24, ge=1, le=168)):
+def get_sentiment_timeseries(hours: int = Query(24, ge=1, le=720)):
     """Hourly weighted sentiment scores for the last N hours."""
     from collections import defaultdict
     conn = get_db()

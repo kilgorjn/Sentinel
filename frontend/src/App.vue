@@ -14,6 +14,9 @@ const route = useRoute()
           <RouterLink to="/" :class="{ active: route.path === '/' }" class="nav-link">
             Dashboard
           </RouterLink>
+          <RouterLink to="/charts" :class="{ active: route.path === '/charts' }" class="nav-link">
+            Charts
+          </RouterLink>
           <RouterLink to="/feeds" :class="{ active: route.path === '/feeds' }" class="nav-link">
             Feeds
           </RouterLink>

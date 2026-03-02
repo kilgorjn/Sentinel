@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import DashboardPage from './pages/DashboardPage.vue'
 import FeedsPage from './pages/FeedsPage.vue'
+import ChartsPage from './pages/ChartsPage.vue'
 
 const routes = [
   {
@@ -12,6 +13,11 @@ const routes = [
     path: '/feeds',
     name: 'Feeds',
     component: FeedsPage,
+  },
+  {
+    path: '/charts',
+    name: 'Charts',
+    component: ChartsPage,
   },
 ]
 

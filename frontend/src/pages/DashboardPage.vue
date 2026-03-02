@@ -1,9 +1,10 @@
 <script setup>
-import { ref, computed, provide, onMounted, onUnmounted } from 'vue'
-import SurgeAlert       from '../components/SurgeAlert.vue'
-import SummaryBar       from '../components/SummaryBar.vue'
-import NarrativeSummary from '../components/NarrativeSummary.vue'
-import EventFeed        from '../components/EventFeed.vue'
+import { ref, computed, provide, onMounted, onUnmounted, watch } from 'vue'
+import SurgeAlert        from '../components/SurgeAlert.vue'
+import SummaryBar        from '../components/SummaryBar.vue'
+import NarrativeSummary  from '../components/NarrativeSummary.vue'
+import EventFeed         from '../components/EventFeed.vue'
+import TimeRangeSelector from '../components/TimeRangeSelector.vue'
 
 const events      = ref([])
 const summary     = ref({ counts: [], total: 0, overall_sentiment: null, overall_sentiment_score: 0 })
@@ -13,6 +14,7 @@ const timeseries          = ref({ labels: [], high: [], medium: [], low: [] })
 const sentimentTimeseries = ref({ labels: [], scores: [] })
 const lastRefresh = ref(null)
 const hiddenClasses = ref(new Set())
+const selectedHours = ref(24)
 
 const timezone = ref('America/New_York')
 provide('timezone', timezone)
@@ -38,11 +40,11 @@ async function refresh() {
   try {
     const [evRes, sumRes, surRes, narRes, tsRes, stRes] = await Promise.all([
       fetch('/api/events?limit=200'),
-      fetch('/api/events/summary'),
+      fetch(`/api/events/summary?hours=${selectedHours.value}`),
       fetch('/api/surge'),
       fetch('/api/events/narrative'),
-      fetch('/api/events/timeseries'),
-      fetch('/api/events/sentiment-timeseries'),
+      fetch(`/api/events/timeseries?hours=${selectedHours.value}`),
+      fetch(`/api/events/sentiment-timeseries?hours=${selectedHours.value}`),
     ])
     events.value             = await evRes.json()
     summary.value            = await sumRes.json()
@@ -67,6 +69,8 @@ onMounted(async () => {
   timer = setInterval(refresh, 30_000)
 })
 onUnmounted(() => clearInterval(timer))
+
+watch(selectedHours, refresh)
 </script>
 
 <template>
@@ -76,7 +80,8 @@ onUnmounted(() => clearInterval(timer))
     </span>
   </h1>
   <SurgeAlert        :surge="surge" />
-  <SummaryBar        :summary="summary" :hidden-classes="hiddenClasses" :timeseries="timeseries" :sentiment-timeseries="sentimentTimeseries" @filter="setFilter" />
+  <TimeRangeSelector v-model="selectedHours" />
+  <SummaryBar        :summary="summary" :hidden-classes="hiddenClasses" :timeseries="timeseries" :sentiment-timeseries="sentimentTimeseries" :hours="selectedHours" @filter="setFilter" />
   <NarrativeSummary  :narrative="narrative" />
   <EventFeed         :events="filteredEvents" :hidden-classes="hiddenClasses" />
 </template>

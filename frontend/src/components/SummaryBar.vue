@@ -2,7 +2,7 @@
 import EventChart     from './EventChart.vue'
 import SentimentChart from './SentimentChart.vue'
 
-const props = defineProps({ summary: Object, hiddenClasses: Object, timeseries: Object, sentimentTimeseries: Object })
+const props = defineProps({ summary: Object, hiddenClasses: Object, timeseries: Object, sentimentTimeseries: Object, hours: { type: Number, default: 24 } })
 const emit  = defineEmits(['filter'])
 
 const COLORS = { HIGH: '#e05252', MEDIUM: '#e0a832', LOW: '#4a9eda' }
@@ -42,6 +42,15 @@ function scoreBarStyle() {
     ? { left: '50%', width: `${pct}%`, background: meta.color }
     : { right: '50%', width: `${pct}%`, background: meta.color }
 }
+
+function formatTimeWindow() {
+  if (props.hours === 1) return 'TOTAL 1h'
+  if (props.hours === 4) return 'TOTAL 4h'
+  if (props.hours === 24) return 'TOTAL 24h'
+  if (props.hours === 168) return 'TOTAL 7d'
+  if (props.hours === 720) return 'TOTAL 30d'
+  return `TOTAL ${props.hours}h`
+}
 </script>
 
 <template>
@@ -74,7 +83,7 @@ function scoreBarStyle() {
       :class="{ active: hiddenClasses.size === 0 }"
       @click="emit('filter', null)"
     >
-      <span class="label">TOTAL 24h</span>
+      <span class="label">{{ formatTimeWindow() }}</span>
       <div class="total-count-row">
         <span class="count">{{ summary.total ?? 0 }}</span>
         <span
@@ -126,13 +135,13 @@ function scoreBarStyle() {
       <div class="chart-panel">
         <span class="chart-label">Events / hr</span>
         <div class="chart-area">
-          <EventChart :timeseries="timeseries" :hidden-classes="hiddenClasses" />
+          <EventChart :timeseries="timeseries" :hidden-classes="hiddenClasses" :hours="hours" />
         </div>
       </div>
       <div class="chart-panel">
         <span class="chart-label">Sentiment / hr</span>
         <div class="chart-area">
-          <SentimentChart :sentiment-timeseries="sentimentTimeseries" />
+          <SentimentChart :sentiment-timeseries="sentimentTimeseries" :hours="hours" />
         </div>
       </div>
     </div>

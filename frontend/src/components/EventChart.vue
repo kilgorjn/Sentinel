@@ -9,15 +9,34 @@ import {
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Legend)
 
-const props = defineProps({ timeseries: Object, hiddenClasses: Object })
+const props = defineProps({
+  timeseries: Object,
+  hiddenClasses: Object,
+  expanded: { type: Boolean, default: false },
+  hours: { type: Number, default: 24 },
+})
 const timezone = inject('timezone', { value: 'America/New_York' })
 const canvas = ref(null)
 let chart = null
 
 function fmtLabel(iso) {
-  return new Date(iso).toLocaleTimeString('en-US', {
+  const d = new Date(iso)
+  if (props.hours > 24) {
+    // Show "MM/DD HH:MM" for multi-day views
+    return d.toLocaleDateString('en-US', {
+      timeZone: timezone.value,
+      month: 'numeric',
+      day: 'numeric',
+    }) + ' ' + d.toLocaleTimeString('en-US', {
+      timeZone: timezone.value,
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+  return d.toLocaleTimeString('en-US', {
     timeZone: timezone.value,
-    hour: '2-digit', minute: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   })
 }
 
@@ -71,7 +90,7 @@ function buildChart() {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { display: false },
+        legend: { display: props.expanded },
         tooltip: {
           backgroundColor: '#1a1a1a',
           borderColor: '#333',
@@ -83,13 +102,13 @@ function buildChart() {
       },
       scales: {
         x: {
-          ticks: { display: false },
-          grid: { color: '#1a1a1a' },
+          ticks: { display: props.expanded, maxTicksLimit: 10 },
+          grid: { color: props.expanded ? '#252525' : '#1a1a1a' },
         },
         y: {
           beginAtZero: true,
-          ticks: { color: '#555', font: { size: 10 }, precision: 0 },
-          grid: { color: '#1a1a1a' },
+          ticks: { color: props.expanded ? '#888' : '#555', font: { size: 10 }, precision: 0 },
+          grid: { color: props.expanded ? '#252525' : '#1a1a1a' },
         },
       },
     },
@@ -99,6 +118,8 @@ function buildChart() {
 onMounted(buildChart)
 watch(() => props.timeseries, buildChart, { deep: true })
 watch(() => props.hiddenClasses, buildChart)
+watch(() => props.expanded, buildChart)
+watch(() => props.hours, buildChart)
 onUnmounted(() => { if (chart) chart.destroy() })
 </script>
 
