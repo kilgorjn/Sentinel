@@ -133,25 +133,57 @@ def run_monitor() -> None:
 
     while True:
         try:
-            if config.MARKET_HOURS_ONLY and not _is_market_hours():
-                log.debug("Outside market hours — sleeping")
-                time.sleep(60)
-                continue
+            # Market data — always runs (catches overnight moves)
+            if config.MARKET_DATA_ENABLED:
+                try:
+                    from core import market_data
+                    snapshots = market_data.fetch_snapshots()
+                    if snapshots:
+                        storage.save_snapshots(snapshots)
+                        signals = market_data.detect_volatility(snapshots)
+                        for signal in signals:
+                            if signal["severity"] == "HIGH":
+                                # Create a synthetic article dict so spike_detector can process it
+                                synthetic = {
+                                    "title": signal["message"],
+                                    "source": f"Market Data ({signal['region'].title()})",
+                                    "published_at": datetime.now(timezone.utc),
+                                }
+                                is_surge = detector.record(synthetic, "HIGH")
+                                alerts.alert_market_signal(signal)
+                                if is_surge:
+                                    alerts.alert_surge(
+                                        count=detector.current_count(),
+                                        recent_titles=detector.recent_events(),
+                                        window_minutes=config.SPIKE_WINDOW_MINUTES,
+                                    )
+                except Exception as e:
+                    log.error("Market data fetch failed: %s", e, exc_info=True)
 
-            log.info("--- Fetching news ---")
-            article_list = feeds.fetch_all()
-            process_articles(article_list, detector)
+            # News fetch — gated by market hours if configured
+            if config.MARKET_HOURS_ONLY and not _is_market_hours():
+                log.debug("Outside market hours — skipping news fetch")
+            else:
+                log.info("--- Fetching news ---")
+                article_list = feeds.fetch_all()
+                process_articles(article_list, detector)
 
             # Periodic summary
             rows = storage.summary()
             counts = {r["classification"]: r["count"] for r in rows}
+            market_msg = ""
+            if config.MARKET_DATA_ENABLED:
+                market_snapshots = storage.get_latest_market_data()
+                if market_snapshots:
+                    market_msg = f"  | Market tickers tracked: {len(market_snapshots)}"
             log.info(
-                "24h totals — HIGH:%d  MEDIUM:%d  LOW:%d  | Surge window: %d/%d",
+                "24h totals — HIGH:%d  MEDIUM:%d  LOW:%d  | Surge window: %d/%d%s",
                 counts.get("HIGH", 0),
                 counts.get("MEDIUM", 0),
                 counts.get("LOW", 0),
                 detector.current_count(),
                 config.SPIKE_HIGH_THRESHOLD,
+                market_msg,
             )
 
         except KeyboardInterrupt:

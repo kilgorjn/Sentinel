@@ -82,6 +82,27 @@ def alert_surge(count: int, recent_titles: list[str], window_minutes: int) -> No
         })
 
 
+def alert_market_signal(signal: dict) -> None:
+    """Print a market volatility signal."""
+    level = signal.get("severity", "MEDIUM")
+    msg = signal.get("message", "")
+    region = signal.get("region", "").title()
+    change = signal.get("change_pct", 0)
+    direction = "▲" if change > 0 else "▼"
+
+    print(
+        f"{_color(level, f'[{level}]')} "
+        f"{_BOLD}MARKET SIGNAL{_RESET} ({region}) "
+        f"{direction} {msg}"
+    )
+
+    # Slack for HIGH market signals
+    if level == "HIGH" and config.SLACK_WEBHOOK_URL:
+        _post_slack({
+            "text": f":chart_with_downwards_trend: *MARKET VOLATILITY*\n{msg}\nRegion: {region}",
+        })
+
+
 def _post_slack(payload: dict) -> None:
     if not config.SLACK_WEBHOOK_URL:
         return

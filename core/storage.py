@@ -48,6 +48,22 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS market_snapshots (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol      TEXT NOT NULL,
+    name        TEXT,
+    region      TEXT,
+    price       REAL,
+    prev_close  REAL,
+    change_pct  REAL,
+    high        REAL,
+    low         REAL,
+    fetched_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_symbol ON market_snapshots(symbol);
+CREATE INDEX IF NOT EXISTS idx_market_fetched ON market_snapshots(fetched_at);
 """
 
 # Keep one connection open for the process lifetime
@@ -235,6 +251,79 @@ def delete_feed(feed_id: str) -> bool:
     except Exception as e:
         log.error("Failed to delete feed: %s", e)
         return False
+
+
+def save_snapshots(snapshots: list[dict]) -> None:
+    """Bulk insert market data snapshots."""
+    if not snapshots:
+        return
+    try:
+        conn = _get_conn()
+        conn.executemany(
+            """
+            INSERT INTO market_snapshots
+              (symbol, name, region, price, prev_close, change_pct, high, low, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    s["symbol"],
+                    s.get("name", ""),
+                    s.get("region", ""),
+                    s.get("price"),
+                    s.get("prev_close"),
+                    s.get("change_pct"),
+                    s.get("high"),
+                    s.get("low"),
+                    s["fetched_at"],
+                )
+                for s in snapshots
+            ],
+        )
+        conn.commit()
+    except Exception as e:
+        log.error("Market snapshot write failed: %s", e)
+
+
+def get_latest_market_data() -> list[dict]:
+    """Return the most recent snapshot per symbol."""
+    try:
+        conn = _get_conn()
+        rows = conn.execute(
+            """
+            SELECT * FROM market_snapshots
+            WHERE fetched_at = (
+                SELECT MAX(fetched_at) FROM market_snapshots AS ms2
+                WHERE ms2.symbol = market_snapshots.symbol
+            )
+            ORDER BY region, name
+            """
+        ).fetchall()
+        cols = [desc[0] for desc in conn.execute("SELECT * FROM market_snapshots LIMIT 0").description]
+        return [dict(zip(cols, row)) for row in rows]
+    except Exception as e:
+        log.error("Latest market data query failed: %s", e)
+        return []
+
+
+def get_market_history(symbol: str, hours: int = 24) -> list[dict]:
+    """Return snapshots for a symbol over the last N hours (for charting)."""
+    try:
+        conn = _get_conn()
+        rows = conn.execute(
+            """
+            SELECT * FROM market_snapshots
+            WHERE symbol = ?
+              AND fetched_at >= datetime('now', ? || ' hours')
+            ORDER BY fetched_at ASC
+            """,
+            (symbol, str(-hours)),
+        ).fetchall()
+        cols = [desc[0] for desc in conn.execute("SELECT * FROM market_snapshots LIMIT 0").description]
+        return [dict(zip(cols, row)) for row in rows]
+    except Exception as e:
+        log.error("Market history query failed: %s", e)
+        return []
 
 
 def toggle_feed(feed_id: str, active: bool) -> dict | None:

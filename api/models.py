@@ -96,6 +96,35 @@ class FeedValidationResult(BaseModel):
     warnings: list[str] = []
 
 
+class MarketSnapshot(BaseModel):
+    symbol: str
+    name: str
+    region: str
+    price: float
+    prev_close: float
+    change_pct: float
+    high: Optional[float] = None
+    low: Optional[float] = None
+    fetched_at: str
+
+
+class MarketVolatilitySignal(BaseModel):
+    type: str           # "index_move" or "cross_market_correlation"
+    severity: str       # "HIGH" or "MEDIUM"
+    symbol: Optional[str] = None
+    name: Optional[str] = None
+    region: str
+    change_pct: float
+    message: str
+
+
+class MarketDataResponse(BaseModel):
+    snapshots: list[MarketSnapshot]
+    signals: list[MarketVolatilitySignal]
+    fetched_at: Optional[str] = None
+    market_data_enabled: bool
+
+
 class AddFeedRequest(BaseModel):
     """Request to add a new feed."""
     url: str

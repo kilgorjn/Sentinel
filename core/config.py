@@ -23,6 +23,36 @@ NEWSAPI_QUERY = "Federal Reserve OR earnings OR jobs report OR market crash OR C
 NEWSAPI_DAILY_LIMIT = 95          # Hard ceiling (free tier = 100; 5 held in reserve)
 NEWSAPI_MIN_INTERVAL_SECONDS = 900 # At least 15 min between calls (~96/day max)
 
+# Market data — global indices and futures via yfinance (no API key needed)
+MARKET_DATA_ENABLED = True  # Set to False to disable market data fetching
+
+# Global index and futures tickers to monitor
+# These are Yahoo Finance symbols. If a ticker returns no price data,
+# it is skipped (market closed or invalid symbol).
+MARKET_TICKERS = {
+    "europe": {
+        "FTSE 100": "^FTSE",
+        "DAX 40": "^GDAXI",
+        "CAC 40": "^FCHI",
+        "Euro Stoxx 50": "^STOXX50E",
+    },
+    "asia": {
+        "Nikkei 225": "^N225",
+        "Hang Seng": "^HSI",
+        "Shanghai Composite": "000001.SS",
+    },
+    "futures": {
+        "S&P 500 Futures": "ES=F",
+        "Nasdaq Futures": "NQ=F",
+        "Dow Futures": "YM=F",
+    },
+}
+
+# Volatility thresholds (% change from previous close)
+MARKET_VOLATILITY_HIGH = 2.0    # >=2% move = HIGH volatility signal
+MARKET_VOLATILITY_MEDIUM = 1.0  # >=1% move = MEDIUM signal
+MARKET_FETCH_INTERVAL = 300     # Seconds between market data fetches (5 min)
+
 # Classification thresholds
 # Score needed for each tier (used internally; Ollama outputs HIGH/MEDIUM/LOW directly)
 HIGH_CONFIDENCE_MIN = 0.6     # Minimum Ollama confidence to trust a HIGH classification
