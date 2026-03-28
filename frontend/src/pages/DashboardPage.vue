@@ -3,6 +3,7 @@ import { ref, computed, provide, onMounted, onUnmounted, watch } from 'vue'
 import SurgeAlert        from '../components/SurgeAlert.vue'
 import SummaryBar        from '../components/SummaryBar.vue'
 import NarrativeSummary  from '../components/NarrativeSummary.vue'
+import GlobalMarkets     from '../components/GlobalMarkets.vue'
 import EventFeed         from '../components/EventFeed.vue'
 import TimeRangeSelector from '../components/TimeRangeSelector.vue'
 
@@ -83,5 +84,6 @@ watch(selectedHours, refresh)
   <TimeRangeSelector v-model="selectedHours" />
   <SummaryBar        :summary="summary" :hidden-classes="hiddenClasses" :timeseries="timeseries" :sentiment-timeseries="sentimentTimeseries" :hours="selectedHours" @filter="setFilter" />
   <NarrativeSummary  :narrative="narrative" />
+  <GlobalMarkets />
   <EventFeed         :events="filteredEvents" :hidden-classes="hiddenClasses" />
 </template>

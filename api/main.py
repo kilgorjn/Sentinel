@@ -16,6 +16,7 @@ from api.models import (
     SurgeResponse, HealthResponse, NarrativeResponse, ConfigResponse,
     TimeseriesResponse, SentimentTimeseriesResponse,
     FeedInfo, FeedValidationResult, AddFeedRequest, AddFeedResponse,
+    MarketSnapshot, MarketVolatilitySignal, MarketDataResponse,
 )
 from api.dependencies import get_db
 
@@ -294,7 +295,16 @@ def get_narrative():
     ).fetchall()
     events = [{"title": r[0], "classification": r[1], "reason": r[2]} for r in rows]
 
-    text = classifier.summarize(events, surge_active=surge_active)
+    # Fetch latest market snapshots for LLM context
+    market_ctx = None
+    if config.FINNHUB_API_KEY:
+        try:
+            from core import storage as market_storage
+            market_ctx = market_storage.get_latest_market_data()
+        except Exception:
+            pass
+
+    text = classifier.summarize(events, surge_active=surge_active, market_context=market_ctx)
     now_str = datetime.now(timezone.utc).isoformat()
 
     cs.set_meta("narrative_text", text)
@@ -414,6 +424,78 @@ def toggle_feed(feed_id: str, active: bool = Query(..., description="Enable or d
         "active": active,
         "message": f"Feed {'enabled' if active else 'disabled'}",
     }
+
+
+@router.get("/market/indices", response_model=MarketDataResponse)
+def get_market_indices():
+    """Latest snapshots for all tracked indices + active volatility signals."""
+    from core import market_data, storage as ms
+
+    configured = bool(config.FINNHUB_API_KEY)
+    snapshots_raw = ms.get_latest_market_data() if configured else []
+
+    snapshots = [
+        MarketSnapshot(
+            symbol=s["symbol"],
+            name=s.get("name", ""),
+            region=s.get("region", ""),
+            price=s.get("price", 0),
+            prev_close=s.get("prev_close", 0),
+            change_pct=s.get("change_pct", 0),
+            high=s.get("high"),
+            low=s.get("low"),
+            fetched_at=s.get("fetched_at", ""),
+        )
+        for s in snapshots_raw
+    ]
+
+    signals_raw = market_data.detect_volatility(snapshots_raw) if snapshots_raw else []
+    signals = [
+        MarketVolatilitySignal(
+            type=sig["type"],
+            severity=sig["severity"],
+            symbol=sig.get("symbol"),
+            name=sig.get("name"),
+            region=sig["region"],
+            change_pct=sig["change_pct"],
+            message=sig["message"],
+        )
+        for sig in signals_raw
+    ]
+
+    fetched_at = snapshots_raw[0]["fetched_at"] if snapshots_raw else None
+
+    return MarketDataResponse(
+        snapshots=snapshots,
+        signals=signals,
+        fetched_at=fetched_at,
+        finnhub_configured=configured,
+    )
+
+
+@router.get("/market/history")
+def get_market_history(
+    symbol: str = Query(..., description="Ticker symbol, e.g. ^N225"),
+    hours: int = Query(24, ge=1, le=720, description="Look-back hours"),
+):
+    """Historical snapshots for a specific symbol (for charting)."""
+    from core import storage as ms
+
+    rows = ms.get_market_history(symbol, hours)
+    return [
+        MarketSnapshot(
+            symbol=r["symbol"],
+            name=r.get("name", ""),
+            region=r.get("region", ""),
+            price=r.get("price", 0),
+            prev_close=r.get("prev_close", 0),
+            change_pct=r.get("change_pct", 0),
+            high=r.get("high"),
+            low=r.get("low"),
+            fetched_at=r.get("fetched_at", ""),
+        )
+        for r in rows
+    ]
 
 
 app.include_router(router)

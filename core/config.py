@@ -23,6 +23,35 @@ NEWSAPI_QUERY = "Federal Reserve OR earnings OR jobs report OR market crash OR C
 NEWSAPI_DAILY_LIMIT = 95          # Hard ceiling (free tier = 100; 5 held in reserve)
 NEWSAPI_MIN_INTERVAL_SECONDS = 900 # At least 15 min between calls (~96/day max)
 
+# Finnhub market data (optional — set API key to enable)
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", None)
+
+# Global index and futures tickers to monitor
+# NOTE: Finnhub symbol format may differ from Yahoo Finance for indices.
+# Verify exact symbols via Finnhub's /stock/symbol endpoint.
+# If a quote returns c=0 and pc=0, the symbol is invalid or the market is closed.
+MARKET_TICKERS = {
+    "europe": {
+        "FTSE 100": "^FTSE",
+        "DAX 40": "^GDAXI",
+        "CAC 40": "^FCHI",
+        "Euro Stoxx 50": "^STOXX50E",
+    },
+    "asia": {
+        "Nikkei 225": "^N225",
+        "Hang Seng": "^HSI",
+    },
+    "futures": {
+        "S&P 500 Futures": "ES=F",
+        "Nasdaq Futures": "NQ=F",
+    },
+}
+
+# Volatility thresholds (% change from previous close)
+MARKET_VOLATILITY_HIGH = 2.0    # >=2% move = HIGH volatility signal
+MARKET_VOLATILITY_MEDIUM = 1.0  # >=1% move = MEDIUM signal
+MARKET_FETCH_INTERVAL = 300     # Seconds between market data fetches (5 min)
+
 # Classification thresholds
 # Score needed for each tier (used internally; Ollama outputs HIGH/MEDIUM/LOW directly)
 HIGH_CONFIDENCE_MIN = 0.6     # Minimum Ollama confidence to trust a HIGH classification

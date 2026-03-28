@@ -134,8 +134,17 @@ Rules: Output ONLY the summary sentences. No preamble, no intro phrase, no label
 SUMMARY:"""
 
 
-def summarize(events: list[dict], surge_active: bool = False) -> str:
-    """Generate a plain-English narrative summary of recent events via Ollama."""
+def summarize(
+    events: list[dict],
+    surge_active: bool = False,
+    market_context: list[dict] | None = None,
+) -> str:
+    """Generate a plain-English narrative summary of recent events via Ollama.
+
+    If *market_context* is provided (a list of snapshot dicts with at least
+    ``name`` and ``change_pct`` keys), significant moves are appended to the
+    prompt so the LLM can weave them into the narrative.
+    """
     if not events:
         return "No significant financial events in the last 24 hours."
     lines = []
@@ -146,7 +155,26 @@ def summarize(events: list[dict], surge_active: bool = False) -> str:
         "the specific causes of the surge and what is driving elevated brokerage activity.\n\n"
         if surge_active else ""
     )
-    prompt = _SUMMARY_PROMPT.format(events="\n".join(lines), surge_context=surge_context)
+
+    # Append market data context if available
+    market_section = ""
+    if market_context:
+        significant = [
+            s for s in market_context if abs(s.get("change_pct", 0)) >= 0.5
+        ]
+        if significant:
+            market_lines = [
+                f"- {s['name']}: {s['change_pct']:+.1f}%"
+                for s in significant
+            ]
+            market_section = (
+                "\n\nGLOBAL MARKET CONTEXT:\n" + "\n".join(market_lines) + "\n"
+            )
+
+    prompt = _SUMMARY_PROMPT.format(
+        events="\n".join(lines) + market_section,
+        surge_context=surge_context,
+    )
     try:
         raw = _call_ollama(prompt)
         text = raw.strip()
