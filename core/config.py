@@ -23,13 +23,12 @@ NEWSAPI_QUERY = "Federal Reserve OR earnings OR jobs report OR market crash OR C
 NEWSAPI_DAILY_LIMIT = 95          # Hard ceiling (free tier = 100; 5 held in reserve)
 NEWSAPI_MIN_INTERVAL_SECONDS = 900 # At least 15 min between calls (~96/day max)
 
-# Finnhub market data (optional — set API key to enable)
-FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", None)
+# Market data — global indices and futures via yfinance (no API key needed)
+MARKET_DATA_ENABLED = True  # Set to False to disable market data fetching
 
 # Global index and futures tickers to monitor
-# NOTE: Finnhub symbol format may differ from Yahoo Finance for indices.
-# Verify exact symbols via Finnhub's /stock/symbol endpoint.
-# If a quote returns c=0 and pc=0, the symbol is invalid or the market is closed.
+# These are Yahoo Finance symbols. If a ticker returns no price data,
+# it is skipped (market closed or invalid symbol).
 MARKET_TICKERS = {
     "europe": {
         "FTSE 100": "^FTSE",
@@ -40,10 +39,12 @@ MARKET_TICKERS = {
     "asia": {
         "Nikkei 225": "^N225",
         "Hang Seng": "^HSI",
+        "Shanghai Composite": "000001.SS",
     },
     "futures": {
         "S&P 500 Futures": "ES=F",
         "Nasdaq Futures": "NQ=F",
+        "Dow Futures": "YM=F",
     },
 }
 

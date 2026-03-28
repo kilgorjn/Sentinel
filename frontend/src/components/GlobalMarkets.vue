@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
-const marketData = ref({ snapshots: [], signals: [], fetched_at: null, finnhub_configured: false })
+const marketData = ref({ snapshots: [], signals: [], fetched_at: null, market_data_enabled: false })
 const loading = ref(true)
 const error = ref(null)
 
@@ -73,8 +73,8 @@ onUnmounted(() => clearInterval(timer))
     </div>
 
     <!-- Not configured -->
-    <div v-if="!loading && !marketData.finnhub_configured" class="gm-notice">
-      Finnhub not configured — set <code>FINNHUB_API_KEY</code> env var to enable market data.
+    <div v-if="!loading && !marketData.market_data_enabled" class="gm-notice">
+      Market data is disabled.
     </div>
 
     <!-- Loading -->
@@ -91,7 +91,7 @@ onUnmounted(() => clearInterval(timer))
       </div>
 
       <!-- No data yet -->
-      <div v-if="marketData.snapshots.length === 0 && marketData.finnhub_configured" class="gm-notice">
+      <div v-if="marketData.snapshots.length === 0 && marketData.market_data_enabled" class="gm-notice">
         No market data yet — waiting for first fetch cycle.
       </div>
 

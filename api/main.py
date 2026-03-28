@@ -297,7 +297,7 @@ def get_narrative():
 
     # Fetch latest market snapshots for LLM context
     market_ctx = None
-    if config.FINNHUB_API_KEY:
+    if config.MARKET_DATA_ENABLED:
         try:
             from core import storage as market_storage
             market_ctx = market_storage.get_latest_market_data()
@@ -431,7 +431,7 @@ def get_market_indices():
     """Latest snapshots for all tracked indices + active volatility signals."""
     from core import market_data, storage as ms
 
-    configured = bool(config.FINNHUB_API_KEY)
+    configured = config.MARKET_DATA_ENABLED
     snapshots_raw = ms.get_latest_market_data() if configured else []
 
     snapshots = [
@@ -469,7 +469,7 @@ def get_market_indices():
         snapshots=snapshots,
         signals=signals,
         fetched_at=fetched_at,
-        finnhub_configured=configured,
+        market_data_enabled=configured,
     )
 
 

@@ -1,5 +1,5 @@
 """
-Fetch global market index quotes from Finnhub and detect pre-market volatility.
+Fetch global market index quotes from Yahoo Finance and detect pre-market volatility.
 
 The whole point of this module is to catch significant overnight moves in
 European/Asian indices and US futures *before* the US market opens.
@@ -7,44 +7,31 @@ European/Asian indices and US futures *before* the US market opens.
 NOTE: MARKET_HOURS_ONLY in config does NOT affect market data fetching —
 we always want to see overnight moves regardless of the polling schedule.
 
-NOTE: Finnhub symbol format may differ from Yahoo Finance for indices.
-If a quote returns c=0 and pc=0, the symbol is unrecognised or the market
-is closed — we skip it rather than recording a spurious 0% change.
+Uses yfinance (no API key required). If a ticker returns no price data
+(market closed or invalid symbol), it is skipped.
 """
 
 import logging
 import time
 from datetime import datetime, timezone
 
-import finnhub
+import yfinance as yf
 
 from . import config
 
 log = logging.getLogger(__name__)
 
-# Lazy-initialised Finnhub client
-_client: finnhub.Client | None = None
-
-
-def _get_client() -> finnhub.Client | None:
-    """Return a Finnhub client if an API key is configured, else None."""
-    global _client
-    if _client is None and config.FINNHUB_API_KEY:
-        _client = finnhub.Client(api_key=config.FINNHUB_API_KEY)
-    return _client
-
 
 def fetch_snapshots() -> list[dict]:
     """
-    Iterate over all tickers in config.MARKET_TICKERS, call the Finnhub
-    quote endpoint for each, and return a list of snapshot dicts.
+    Iterate over all tickers in config.MARKET_TICKERS, use yfinance
+    fast_info for each, and return a list of snapshot dicts.
 
-    Handles API errors gracefully (logs and skips individual tickers).
-    Adds a small sleep between calls to respect the 60 calls/min rate limit.
+    Handles errors gracefully (logs and skips individual tickers).
+    Adds a 0.5s sleep between calls to be polite to Yahoo's servers.
     """
-    client = _get_client()
-    if client is None:
-        log.debug("Finnhub not configured — skipping market data fetch")
+    if not config.MARKET_DATA_ENABLED:
+        log.debug("Market data disabled — skipping fetch")
         return []
 
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -53,47 +40,33 @@ def fetch_snapshots() -> list[dict]:
     for region, tickers in config.MARKET_TICKERS.items():
         for name, symbol in tickers.items():
             try:
-                quote = client.quote(symbol)
+                ticker = yf.Ticker(symbol)
+                info = ticker.fast_info
+                price = info.last_price
+                prev_close = info.previous_close
 
-                # Finnhub quote fields: c (current), pc (prev close),
-                # dp (percent change), h (high), l (low), t (timestamp)
-                current_price = quote.get("c", 0)
-                prev_close = quote.get("pc", 0)
-
-                # Skip if quote returns all zeros — symbol not recognised
-                # or market is closed with no data
-                if current_price == 0 and prev_close == 0:
-                    log.debug(
-                        "Skipping %s (%s): quote returned zeros "
-                        "(symbol invalid or market closed)",
-                        name, symbol,
-                    )
+                if not price or not prev_close or price == 0 or prev_close == 0:
+                    log.debug("Skipping %s (%s): no price data", name, symbol)
                     continue
 
-                change_pct = quote.get("dp", 0.0)
-                # Fallback: compute change_pct ourselves if dp is missing/zero
-                if change_pct == 0 and prev_close != 0 and current_price != 0:
-                    change_pct = round(
-                        ((current_price - prev_close) / prev_close) * 100, 2
-                    )
+                change_pct = round(((price - prev_close) / prev_close) * 100, 2)
 
                 snapshots.append({
                     "symbol": symbol,
                     "name": name,
                     "region": region,
-                    "price": current_price,
+                    "price": price,
                     "prev_close": prev_close,
                     "change_pct": change_pct,
-                    "high": quote.get("h"),
-                    "low": quote.get("l"),
+                    "high": None,
+                    "low": None,
                     "fetched_at": now_iso,
                 })
 
             except Exception as e:
                 log.warning("Failed to fetch quote for %s (%s): %s", name, symbol, e)
 
-            # Small delay to stay within 60 calls/min rate limit
-            time.sleep(1.1)
+            time.sleep(0.5)
 
     log.info("Fetched %d market snapshots", len(snapshots))
     return snapshots

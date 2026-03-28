@@ -122,7 +122,7 @@ class MarketDataResponse(BaseModel):
     snapshots: list[MarketSnapshot]
     signals: list[MarketVolatilitySignal]
     fetched_at: Optional[str] = None
-    finnhub_configured: bool
+    market_data_enabled: bool
 
 
 class AddFeedRequest(BaseModel):

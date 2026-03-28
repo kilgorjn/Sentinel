@@ -133,19 +133,8 @@ def run_monitor() -> None:
 
     while True:
         try:
-            if config.MARKET_HOURS_ONLY and not _is_market_hours():
-                log.debug("Outside market hours — sleeping")
-                time.sleep(60)
-                continue
-
-            log.info("--- Fetching news ---")
-            article_list = feeds.fetch_all()
-            process_articles(article_list, detector)
-
-            # Market data check (if Finnhub configured)
-            # NOTE: This runs regardless of MARKET_HOURS_ONLY — the whole
-            # point is to catch overnight moves before the US market opens.
-            if config.FINNHUB_API_KEY:
+            # Market data — always runs (catches overnight moves)
+            if config.MARKET_DATA_ENABLED:
                 try:
                     from core import market_data
                     snapshots = market_data.fetch_snapshots()
@@ -171,11 +160,19 @@ def run_monitor() -> None:
                 except Exception as e:
                     log.error("Market data fetch failed: %s", e, exc_info=True)
 
+            # News fetch — gated by market hours if configured
+            if config.MARKET_HOURS_ONLY and not _is_market_hours():
+                log.debug("Outside market hours — skipping news fetch")
+            else:
+                log.info("--- Fetching news ---")
+                article_list = feeds.fetch_all()
+                process_articles(article_list, detector)
+
             # Periodic summary
             rows = storage.summary()
             counts = {r["classification"]: r["count"] for r in rows}
             market_msg = ""
-            if config.FINNHUB_API_KEY:
+            if config.MARKET_DATA_ENABLED:
                 market_snapshots = storage.get_latest_market_data()
                 if market_snapshots:
                     market_msg = f"  | Market tickers tracked: {len(market_snapshots)}"
