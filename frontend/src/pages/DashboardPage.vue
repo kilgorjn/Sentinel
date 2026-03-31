@@ -92,8 +92,20 @@ watch(selectedHours, refresh)
   <PredictionBanner  :prediction="prediction" />
   <GlobalMarkets />
   <SurgeAlert        :surge="surge" />
+  <h2 class="section-header">News Analysis</h2>
   <TimeRangeSelector v-model="selectedHours" />
   <SummaryBar        :summary="summary" :hidden-classes="hiddenClasses" :timeseries="timeseries" :sentiment-timeseries="sentimentTimeseries" :hours="selectedHours" @filter="setFilter" />
   <NarrativeSummary  :narrative="narrative" />
   <EventFeed         :events="filteredEvents" :hidden-classes="hiddenClasses" />
 </template>
+
+<style scoped>
+.section-header {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #888;
+  margin: 24px 0 12px;
+}
+</style>
