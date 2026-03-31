@@ -17,6 +17,7 @@ from api.models import (
     TimeseriesResponse, SentimentTimeseriesResponse,
     FeedInfo, FeedValidationResult, AddFeedRequest, AddFeedResponse,
     MarketSnapshot, MarketVolatilitySignal, MarketDataResponse,
+    PredictionResponse,
 )
 from api.dependencies import get_db
 
@@ -144,6 +145,87 @@ def get_surge():
         window_minutes=config.SPIKE_WINDOW_MINUTES,
         threshold=config.SPIKE_HIGH_THRESHOLD,
     )
+
+
+PREDICTION_TTL_SECONDS = 60  # Recompute at most once per minute
+
+
+@router.get("/prediction", response_model=PredictionResponse)
+def get_prediction():
+    """Composite brokerage login volume prediction derived from news, market, and sentiment signals."""
+    from core import predictor, storage as cs
+
+    conn = get_db()
+
+    # Check cache — inputs change slowly, no need to recompute every request
+    cached_result  = cs.get_meta("prediction_result")
+    cached_at      = cs.get_meta("prediction_computed_at")
+    if cached_result and cached_at:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(cached_at)).total_seconds()
+        if age < PREDICTION_TTL_SECONDS:
+            import json
+            data = json.loads(cached_result)
+            data["computed_at"] = cached_at
+            # tooltip is always derived from the level — never stored in cache
+            data["tooltip"] = predictor.LEVELS[data["level"]]["tooltip"]
+            return PredictionResponse(**data)
+
+    # --- Surge / HIGH count in window ---------------------------------------
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=config.SPIKE_WINDOW_MINUTES)).isoformat()
+    row = conn.execute(
+        "SELECT COUNT(*) FROM news_events WHERE classification = 'HIGH' AND published_at >= ?",
+        (cutoff,),
+    ).fetchone()
+    high_count = row[0] if row else 0
+    surge_active = high_count >= config.SPIKE_HIGH_THRESHOLD
+
+    # --- MEDIUM count in window ---------------------------------------------
+    row = conn.execute(
+        "SELECT COUNT(*) FROM news_events WHERE classification = 'MEDIUM' AND published_at >= ?",
+        (cutoff,),
+    ).fetchone()
+    medium_count = row[0] if row else 0
+
+    # --- Overall sentiment score (last 24 h) --------------------------------
+    sentiment_score = 0.0
+    weights = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
+    sent_scores = {"POSITIVE": 1, "NEGATIVE": -1, "NEUTRAL": 0}
+    rows = conn.execute(
+        "SELECT classification, sentiment FROM news_events WHERE created_at >= datetime('now', '-24 hours')"
+    ).fetchall()
+    total_weight = sum(weights.get(r[0], 1) for r in rows)
+    if total_weight:
+        weighted_sum = sum(weights.get(r[0], 1) * sent_scores.get(r[1], 0) for r in rows)
+        sentiment_score = round(weighted_sum / total_weight, 3)
+
+    # --- Market volatility signals ------------------------------------------
+    market_signals = []
+    if config.MARKET_DATA_ENABLED:
+        try:
+            from core import market_data, storage as market_storage
+            snapshots = market_storage.get_latest_market_data()
+            if snapshots:
+                market_signals = market_data.detect_volatility(snapshots)
+        except Exception:
+            pass
+
+    # --- Compute score ------------------------------------------------------
+    result = predictor.compute_score(
+        surge_active=surge_active,
+        high_count_in_window=high_count,
+        medium_count_in_window=medium_count,
+        market_signals=market_signals,
+        sentiment_score=sentiment_score,
+    )
+
+    now_str = datetime.now(timezone.utc).isoformat()
+
+    # Cache result — tooltip is excluded (always derived from level at read time)
+    import json
+    cs.set_meta("prediction_result", json.dumps({k: v for k, v in result.items() if k != "tooltip"}))
+    cs.set_meta("prediction_computed_at", now_str)
+
+    return PredictionResponse(**result, computed_at=now_str)
 
 
 @router.get("/health", response_model=HealthResponse)
