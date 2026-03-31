@@ -6,6 +6,47 @@ A web UI displays the live event feed, classification summary, an AI-generated n
 
 ## How it works
 
+
+### From signals to prediction
+
+Sentinel combines two independent data streams — financial news and global market data — into a single brokerage login volume prediction. News articles are classified by market impact (HIGH / MEDIUM / LOW) and assigned a financial sentiment (POSITIVE / NEGATIVE / NEUTRAL) by a local Ollama LLM. In parallel, global index quotes from yfinance are evaluated for volatility, detecting significant single-index moves and cross-market correlations. Both streams feed a composite scoring engine that produces the Brokerage Login Prediction visible at the top of the Dashboard.
+
+```mermaid
+flowchart LR
+    A["News Article<br/>(RSS / NewsAPI)"]
+    M["Global Market Data<br/>(yfinance)"]
+    P["Brokerage Login Prediction<br/>(NORMAL / MODERATE / ELEVATED / SURGE)"]
+
+    subgraph impact["Impact Classification"]
+        B1["HIGH<br/>Broad market event"]
+        B2["MEDIUM<br/>Company-specific"]
+        B3["LOW<br/>Commentary / noise"]
+    end
+
+    subgraph sentiment["Financial Sentiment"]
+        C1["POSITIVE<br/>Encourages buying"]
+        C2["NEGATIVE<br/>Triggers concern"]
+        C3["NEUTRAL<br/>Ambiguous"]
+    end
+
+    subgraph volatility["Volatility Signals"]
+        V1["HIGH<br/>Index move ≥ 2%"]
+        V2["MEDIUM<br/>Index move ≥ 1%"]
+        V3["Cross-market<br/>Correlation"]
+    end
+
+    A --> B1 & B2 & B3
+    B1 & B2 & B3 --> C1 & C2 & C3
+    M --> V1 & V2 & V3
+
+    C1 & C2 & C3 --> P
+    V1 & V2 & V3 --> P
+```
+
+The spike detection mirrors a login-volume spike pattern: instead of counting logins per time window, it counts HIGH-impact news events. A burst of major events is a leading indicator that user logins will spike within 10–15 minutes.
+
+
+### Flow diagram
 ```mermaid
 flowchart TD
     subgraph sources["External Sources"]
@@ -23,8 +64,14 @@ flowchart TD
 
     subgraph egress["Storage and Egress"]
         db["news_events.db<br/>SQLite"]
-        log["financial_news.log<br/>Splunk"]
+        log["financial_news.log"]
         slack["Slack Webhook"]
+    end
+
+    predictor["core/predictor.py<br/>Volume Prediction"]
+
+    subgraph inference["Inference"]
+        narrative["core/classifier.py<br/>Narrative Summary"]
     end
 
     subgraph apifrontend["API and Frontend"]
@@ -37,19 +84,24 @@ flowchart TD
     YF --> market
 
     feeds --> classifier
-    market --> classifier
 
     classifier --> spike
     classifier --> db
     classifier --> log
+    market --> db
     spike --> slack
 
+    db --> predictor
+    db --> narrative
+    market --> predictor
+
+    predictor --> api
+    narrative --> api
     db --> api
     log --> api
     api --> ui
 ```
 
-The spike detection mirrors a login-volume spike pattern: instead of counting logins per time window, it counts HIGH-impact news events. A burst of major events is a leading indicator that user logins will spike within 10–15 minutes.
 
 
 ## News Article Classification levels
@@ -90,6 +142,44 @@ Each quote shows the current price and percentage change from the previous close
 | **MEDIUM volatility** | ≥ 1.0% move from previous close |
 
 Volatility signals are logged alongside news events, giving you a second leading indicator — a sharp pre-market move in European or Asian indices often precedes a US open-bell login surge even when no news article has been classified HIGH yet.
+
+## Volume Prediction
+
+The Dashboard displays a **Volume Prediction** banner at the top of the page — the primary output of Sentinel. It answers the question: *"How busy is our brokerage going to be in the next 15–30 minutes?"*
+
+### Prediction levels
+
+| Level | Label | Expected Login Volume | Action |
+|-------|-------|-----------------------|--------|
+| 1 | **NORMAL** | Baseline | No action needed |
+| 2 | **MODERATE** | 10–25% above baseline | Watch for escalation |
+| 3 | **ELEVATED** | 25–75% above baseline | Monitor closely — consider additional resources |
+| 4 | **SURGE** | 75%+ above baseline | All hands — expect significant login queue pressure |
+
+> Volume percentages are placeholders pending calibration against Splunk login data. Update the `LEVELS` dict in `core/predictor.py` once baseline correlation data is available.
+
+### How the score is computed
+
+A raw score (0–100+) is calculated by summing weighted signals, then mapped to a level. All signals are derived from data already collected by Sentinel — no additional sources required.
+
+| Signal | Condition | Points |
+|--------|-----------|--------|
+| Surge detector | Surge active | +40 |
+| HIGH news events | Per event in spike window (max 3) | +10 each |
+| MEDIUM news events | Per event in spike window (max 3) | +4 each |
+| Market volatility — HIGH | Per index ≥ 2% move (max 2) | +10 each |
+| Market volatility — MEDIUM | Per index ≥ 1% move (max 2) | +5 each |
+| Cross-market correlation | Global rally or sell-off signal | +10 |
+| Sentiment — fear | Overall sentiment score ≤ −0.5 | +8 |
+| Sentiment — euphoria | Overall sentiment score ≥ +0.5 | +5 |
+
+The banner also shows **key drivers** — the specific signals that contributed to the current score — so the prediction is always explainable, not just a number.
+
+The score is recomputed at most once per minute and cached in SQLite between requests.
+
+### Tuning
+
+Weights are defined in `core/predictor.py` (`W_*` constants) and can be adjusted without touching the API or frontend. The `actual_impact` column in `news_events` is reserved for recording whether a predicted spike was confirmed — once enough events are logged, weights can be calibrated empirically.
 
 ## Situation Summary
 
@@ -154,6 +244,7 @@ Additional settings (RSS feeds, market tickers, confidence thresholds) live in `
 The frontend is a Vue 3 SPA with three pages, accessible via the top navigation:
 
 ### Dashboard (`/`)
+- **Prediction banner** — color-coded brokerage login volume prediction (NORMAL / MODERATE / ELEVATED / SURGE) with expected volume range, recommended action, and key signal drivers; displayed at the very top of the page
 - **Surge alert banner** — prominently displayed when a SURGE is active
 - **Summary bar** — HIGH / MEDIUM / LOW counts for the last 24 hours; click tiles to toggle visibility
 - **Narrative summary** — AI-generated 3–4 sentence analysis of current events, updated every 15 minutes; surge-aware
@@ -162,7 +253,7 @@ The frontend is a Vue 3 SPA with three pages, accessible via the top navigation:
 
 ### Charts (`/charts`)
 - **Sentiment chart** — Time-series view of POSITIVE / NEGATIVE / NEUTRAL sentiment scores
-- **Global markets** — Live quotes for major indices (US, Europe, Asia) with % change, fetched via yfinance
+- **Global markets** — Live quotes for major indices (US, Europe, Asia) with % change, fetched via yfinance; per-symbol historical snapshots available via `/api/market/history` (not yet surfaced in the UI)
 
 ### Feeds (`/feeds`)
 - Add, remove, and enable/disable RSS feeds at runtime — no restart required

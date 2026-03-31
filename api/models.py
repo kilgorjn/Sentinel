@@ -125,6 +125,18 @@ class MarketDataResponse(BaseModel):
     market_data_enabled: bool
 
 
+class PredictionResponse(BaseModel):
+    level: int                # 1=NORMAL, 2=MODERATE, 3=ELEVATED, 4=SURGE
+    label: str                # NORMAL | MODERATE | ELEVATED | SURGE
+    color: str                # green | yellow | orange | red
+    volume: str               # expected login volume description
+    action: str               # recommended action
+    tooltip: str              # detailed action guidance (shown on hover)
+    score: int                # raw composite score
+    drivers: list[str]        # plain-English explanation of top contributors
+    computed_at: str          # ISO timestamp
+
+
 class AddFeedRequest(BaseModel):
     """Request to add a new feed."""
     url: str
