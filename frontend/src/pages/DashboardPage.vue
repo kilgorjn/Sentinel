@@ -90,10 +90,10 @@ watch(selectedHours, refresh)
     </span>
   </h1>
   <PredictionBanner  :prediction="prediction" />
+  <GlobalMarkets />
   <SurgeAlert        :surge="surge" />
   <TimeRangeSelector v-model="selectedHours" />
   <SummaryBar        :summary="summary" :hidden-classes="hiddenClasses" :timeseries="timeseries" :sentiment-timeseries="sentimentTimeseries" :hours="selectedHours" @filter="setFilter" />
   <NarrativeSummary  :narrative="narrative" />
-  <GlobalMarkets />
   <EventFeed         :events="filteredEvents" :hidden-classes="hiddenClasses" />
 </template>
