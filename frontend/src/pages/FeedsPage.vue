@@ -1,10 +1,21 @@
 <script setup>
+import { ref, onMounted } from 'vue'
 import FeedManager from '../components/FeedManager.vue'
+
+const readOnly = ref(false)
+
+onMounted(async () => {
+  const res = await fetch('/api/config').catch(() => null)
+  if (res?.ok) {
+    const cfg = await res.json()
+    readOnly.value = cfg.read_only ?? false
+  }
+})
 </script>
 
 <template>
   <div class="feeds-page">
-    <FeedManager />
+    <FeedManager :read-only="readOnly" />
   </div>
 </template>
 
