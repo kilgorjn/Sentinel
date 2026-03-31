@@ -54,6 +54,10 @@ function formatTimeWindow() {
 </script>
 
 <template>
+  <div class="summary-bar-header">
+    <span class="summary-bar-title">News Event Counts</span>
+    <span class="summary-bar-info" title="Each article is classified by its likely impact on brokerage login volume (HIGH / MEDIUM / LOW) and assigned a financial sentiment (▲ Positive / ▼ Negative / ~ Neutral). HIGH events are weighted 3×, MEDIUM 2×, LOW 1× in the overall sentiment score. Click a tile to filter the event feed below.">ⓘ</span>
+  </div>
   <div class="summary-bar">
     <div
       v-for="cls in ['HIGH', 'MEDIUM', 'LOW']"
@@ -149,6 +153,27 @@ function formatTimeWindow() {
 </template>
 
 <style scoped>
+.summary-bar-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 20px;
+  margin-top: 16px;
+  margin-bottom: 6px;
+}
+.summary-bar-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #888;
+}
+.summary-bar-info {
+  font-size: 0.78rem;
+  color: #555;
+  cursor: help;
+}
+
 .summary-bar { display: flex; gap: 12px; align-items: stretch;
                padding: 16px 20px; border-bottom: 1px solid #1e1e1e;
                overflow-x: auto; -webkit-overflow-scrolling: touch;
