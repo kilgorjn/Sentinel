@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
 
+const props = defineProps({ readOnly: { type: Boolean, default: false } })
+
 const feeds = ref([])
 const loading = ref(false)
 const newFeedUrl = ref('')
@@ -132,7 +134,8 @@ const hasErrors = computed(() => validationResult.value?.errors?.length > 0)
   <div class="feed-manager">
     <div class="header">
       <h2>RSS Feed Management</h2>
-      <button v-if="!showAddForm" class="btn-add" @click="showAddForm = true">
+      <span v-if="readOnly" class="read-only-badge" title="This instance is in read-only mode. Feed management is disabled.">Read-only</span>
+      <button v-if="!showAddForm && !readOnly" class="btn-add" @click="showAddForm = true">
         + Add Feed
       </button>
     </div>
@@ -253,12 +256,17 @@ const hasErrors = computed(() => validationResult.value?.errors?.length > 0)
           </div>
           <div class="feed-actions">
             <button
-              @click="toggleFeed(feed.id, feed.active)"
-              :class="['btn-toggle', feed.active ? 'active' : 'inactive']"
+              @click="!readOnly && toggleFeed(feed.id, feed.active)"
+              :class="['btn-toggle', feed.active ? 'active' : 'inactive', { disabled: readOnly }]"
+              :title="readOnly ? 'Read-only mode' : ''"
             >
               {{ feed.active ? '✓ Active' : '○ Inactive' }}
             </button>
-            <button @click="deleteFeed(feed.id)" class="btn-delete">
+            <button
+              v-if="!readOnly"
+              @click="deleteFeed(feed.id)"
+              class="btn-delete"
+            >
               Delete
             </button>
           </div>
@@ -295,6 +303,24 @@ const hasErrors = computed(() => validationResult.value?.errors?.length > 0)
   font-size: 1.5rem;
   color: #e0e0e0;
   margin: 0;
+}
+
+.read-only-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #888;
+  background: #222;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: default;
+}
+
+.btn-toggle.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .btn-add {

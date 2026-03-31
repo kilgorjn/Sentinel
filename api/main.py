@@ -324,7 +324,7 @@ def get_sentiment_timeseries(hours: int = Query(24, ge=1, le=720)):
 @router.get("/config", response_model=ConfigResponse)
 def get_config():
     """Frontend display settings derived from server config."""
-    return ConfigResponse(display_timezone=config.DISPLAY_TIMEZONE)
+    return ConfigResponse(display_timezone=config.DISPLAY_TIMEZONE, read_only=config.READ_ONLY)
 
 
 NARRATIVE_TTL_SECONDS = 900  # Regenerate at most every 15 minutes
@@ -415,6 +415,11 @@ def list_feeds():
     ]
 
 
+def _check_read_only():
+    if config.READ_ONLY:
+        raise HTTPException(status_code=403, detail="This instance is in read-only mode.")
+
+
 @router.post("/feeds/validate", response_model=FeedValidationResult)
 def validate_feed(request: AddFeedRequest):
     """Test a feed URL and detect its type.
@@ -443,6 +448,7 @@ def validate_feed(request: AddFeedRequest):
 @router.post("/feeds", response_model=AddFeedResponse)
 def add_feed(request: AddFeedRequest):
     """Add a new RSS feed after validating it."""
+    _check_read_only()
     from core import feed_handlers, feeds_manager
 
     # Validate the feed first
@@ -483,6 +489,7 @@ def add_feed(request: AddFeedRequest):
 @router.delete("/feeds/{feed_id}")
 def delete_feed(feed_id: str):
     """Remove a feed by ID."""
+    _check_read_only()
     from core import feeds_manager
 
     success = feeds_manager.delete_feed(feed_id)
@@ -495,6 +502,7 @@ def delete_feed(feed_id: str):
 @router.patch("/feeds/{feed_id}")
 def toggle_feed(feed_id: str, active: bool = Query(..., description="Enable or disable feed")):
     """Enable/disable a feed."""
+    _check_read_only()
     from core import feeds_manager
 
     feed = feeds_manager.toggle_feed(feed_id, active)

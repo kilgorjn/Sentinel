@@ -74,5 +74,8 @@ DISPLAY_TIMEZONE = os.getenv("DISPLAY_TIMEZONE", "").strip() or "America/New_Yor
 DB_PATH  = os.getenv("SENTINEL_DB_PATH",  str(_ROOT / "news_events.db"))
 LOG_PATH = os.getenv("SENTINEL_LOG_PATH", str(_ROOT / "financial_news.log"))
 
+# Read-only mode — disables feed add/delete/toggle via API and UI
+READ_ONLY = os.getenv("READ_ONLY", "true").strip().lower() not in ("0", "false", "no")
+
 # Alerts — Slack (set webhook URL to enable, leave None to disable)
 SLACK_WEBHOOK_URL = None      # e.g. "https://hooks.slack.com/services/..."

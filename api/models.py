@@ -61,6 +61,7 @@ class NarrativeResponse(BaseModel):
 
 class ConfigResponse(BaseModel):
     display_timezone: str
+    read_only: bool
 
 
 class TimeseriesResponse(BaseModel):
