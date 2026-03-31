@@ -2,28 +2,108 @@
 
 Monitors financial news feeds, classifies articles by market impact using a local Ollama LLM, and fires alerts when a burst of high-impact events is detected. Designed to give brokerage ops teams advance warning before login volume spikes hit.
 
-A web UI displays the live event feed, classification summary, an AI-generated narrative, and a 24-hour trend chart — all auto-refreshing every 30 seconds.
+A web UI displays the live event feed, classification summary, an AI-generated narrative, global market indices, sentiment charts, and a 24-hour trend chart — all auto-refreshing every 30 seconds.
 
 ## How it works
 
-```
-RSS Feeds / NewsAPI
-      ↓
-  core/feeds.py       — fetch & deduplicate articles every 5 minutes
-      ↓
-  core/classifier.py  — ask local Ollama to classify each article HIGH / MEDIUM / LOW
-                        and generate a narrative summary of current events
-      ↓
-  core/spike_detector — sliding 30-min window; SURGE alert when ≥3 HIGH events accumulate
-      ↓
-  core/storage.py     — write to SQLite (accuracy tracking) + JSON log (Splunk ingestion)
-      ↓
-  core/alerts.py      — color-coded console output; optional Slack webhook
-      ↓
-  api/main.py         — FastAPI REST API consumed by the Vue frontend
+```mermaid
+flowchart TD
+    subgraph sources["External Sources"]
+        RSS["RSS Feeds"]
+        NEWSAPI["NewsAPI"]
+        YF["yfinance (Market Data)"]
+    end
+
+    subgraph backend["Sentinel Backend"]
+        feeds["core/feeds.py"]
+        market["core/market_data.py"]
+        classifier["core/classifier.py<br/>Ollama LLM"]
+        spike["core/spike_detector.py"]
+    end
+
+    subgraph egress["Storage and Egress"]
+        db["news_events.db<br/>SQLite"]
+        log["financial_news.log<br/>Splunk"]
+        slack["Slack Webhook"]
+    end
+
+    subgraph apifrontend["API and Frontend"]
+        api["api/main.py<br/>FastAPI"]
+        ui["Vue Frontend<br/>localhost:8000"]
+    end
+
+    RSS --> feeds
+    NEWSAPI --> feeds
+    YF --> market
+
+    feeds --> classifier
+    market --> classifier
+
+    classifier --> spike
+    classifier --> db
+    classifier --> log
+    spike --> slack
+
+    db --> api
+    log --> api
+    api --> ui
 ```
 
 The spike detection mirrors a login-volume spike pattern: instead of counting logins per time window, it counts HIGH-impact news events. A burst of major events is a leading indicator that user logins will spike within 10–15 minutes.
+
+
+## News Article Classification levels
+
+| Level | Examples | Expected login impact |
+|-------|----------|-----------------------|
+| **HIGH** | Fed rate decisions, CPI/jobs report, market moves >3%, trading halts | Likely spike within 10–15 min |
+| **MEDIUM** | Earnings beats/misses, IPOs, options expiration, Fed speculation | Possible moderate increase |
+| **LOW** | Analyst upgrades, minor commentary, already-priced-in news | Minimal impact |
+
+## News Article Sentiment
+
+Each article is assigned a sentiment label alongside its classification. Sentiment captures the emotional tone of the news relative to investor mood — independent of how market-moving the event is (a trading halt is HIGH impact but could be NEGATIVE or NEUTRAL sentiment depending on context).
+
+| Sentiment | Meaning | Examples |
+|-----------|---------|---------|
+| **POSITIVE** | Good news likely to encourage buying or calm | Rate cuts, strong jobs/earnings, market rallies, deal closings |
+| **NEGATIVE** | Bad news likely to trigger concern or selling | Rate hikes, recession signals, market drops, scandals, trading halts |
+| **NEUTRAL** | Informational, mixed, or ambiguous investor impact | Scheduled data releases with in-line results, routine Fed commentary |
+
+Sentiment is tracked over time and displayed as a time-series chart on the Charts page, allowing you to spot shifts in overall market tone before they surface as login volume changes.
+
+## Global Markets
+
+The Charts page displays live quotes for major indices across three regions, fetched every 5 minutes via yfinance (no API key required). Market data fetching is always active — it is not restricted by `MARKET_HOURS_ONLY`, since overnight moves in European and Asian markets are often the most useful early-warning signal.
+
+| Region | Indices |
+|--------|---------|
+| **Europe** | FTSE 100, DAX 40, CAC 40, Euro Stoxx 50 |
+| **Asia** | Nikkei 225, Hang Seng, Shanghai Composite |
+| **US Futures** | S&P 500 Futures, Nasdaq Futures, Dow Futures |
+
+Each quote shows the current price and percentage change from the previous close. Sentinel also runs volatility detection against these snapshots:
+
+| Signal | Threshold |
+|--------|-----------|
+| **HIGH volatility** | ≥ 2.0% move from previous close |
+| **MEDIUM volatility** | ≥ 1.0% move from previous close |
+
+Volatility signals are logged alongside news events, giving you a second leading indicator — a sharp pre-market move in European or Asian indices often precedes a US open-bell login surge even when no news article has been classified HIGH yet.
+
+## Situation Summary
+
+The Dashboard displays an AI-generated 3–4 sentence narrative that synthesizes current market conditions into plain English. It is designed to answer the question a brokerage ops analyst would ask first: *"What is happening right now, and why are customers logging in?"*
+
+**How it is derived:**
+
+1. The last 24 hours of classified events are pulled from SQLite, ordered by impact (HIGH first, then MEDIUM), capped at 25 articles.
+2. If market data is enabled, any global index with a move ≥ 0.5% from its previous close is appended as additional context.
+3. Both are sent to the Ollama LLM in a single prompt, which instructs it to cover: the main financial themes driving market attention, why brokerage customers are likely logging in, and any key risk factors or catalysts to watch.
+4. The result is cached in SQLite. Ollama is only called again when the cache is older than 15 minutes **or** the event count or surge state has changed since the last generation — whichever comes first.
+
+**Surge-aware behaviour:** When a SURGE is active, the prompt instructs the LLM to focus specifically on explaining the causes of the surge rather than giving a general market overview. The summary component on the Dashboard indicates when a surge-mode narrative is being displayed.
+
 
 ## Prerequisites
 
@@ -63,19 +143,31 @@ Copy `.env.example` to `.env` and set values. All settings can also be overridde
 | `SPIKE_WINDOW_MINUTES` | `30` | Rolling window for burst detection |
 | `SPIKE_HIGH_THRESHOLD` | `3` | HIGH events in window before SURGE fires |
 | `POLL_INTERVAL_SECONDS` | `300` | How often to fetch news (5 minutes) |
-| `MARKET_HOURS_ONLY` | `False` | Set `True` to restrict polling to 09:00–17:00 ET Mon–Fri |
+| `MARKET_HOURS_ONLY` | `False` | Set `True` to restrict news polling to 09:00–17:00 ET Mon–Fri |
+| `MARKET_DATA_ENABLED` | `True` | Fetch global index quotes via yfinance |
 | `SLACK_WEBHOOK_URL` | *(unset)* | Set to enable Slack surge alerts |
 
-Additional settings (RSS feeds, confidence thresholds) live in `core/config.py`.
+Additional settings (RSS feeds, market tickers, confidence thresholds) live in `core/config.py`.
 
 ## Web UI
 
-The frontend provides:
+The frontend is a Vue 3 SPA with three pages, accessible via the top navigation:
 
+### Dashboard (`/`)
+- **Surge alert banner** — prominently displayed when a SURGE is active
 - **Summary bar** — HIGH / MEDIUM / LOW counts for the last 24 hours; click tiles to toggle visibility
-- **Trend chart** — 24-hour line chart showing event volume per classification, based on article publication time
-- **Narrative summary** — AI-generated 3–4 sentence analysis of current events, updated every 15 minutes; surge-aware (explains what is driving the spike when a SURGE is active)
+- **Narrative summary** — AI-generated 3–4 sentence analysis of current events, updated every 15 minutes; surge-aware
+- **Trend chart** — 24-hour line chart showing event volume per classification with a time range selector
 - **Event feed** — Full list of classified articles with source, timestamp, confidence, and reason
+
+### Charts (`/charts`)
+- **Sentiment chart** — Time-series view of POSITIVE / NEGATIVE / NEUTRAL sentiment scores
+- **Global markets** — Live quotes for major indices (US, Europe, Asia) with % change, fetched via yfinance
+
+### Feeds (`/feeds`)
+- Add, remove, and enable/disable RSS feeds at runtime — no restart required
+- Feed list is persisted in SQLite (survives redeployment)
+- One-time automatic migration from `feeds.json` to the database on first run
 
 ## Portainer / Docker stack deployment
 
@@ -128,7 +220,7 @@ index=news classification=HIGH
 ```
 
 ### `news_events.db`
-SQLite database for tracking classification accuracy over time.
+SQLite database for tracking classification accuracy over time and storing user-configured feeds.
 
 ```bash
 # Access the DB inside the running Docker container
@@ -150,13 +242,7 @@ WHERE actual_impact IS NOT NULL
 GROUP BY classification, actual_impact;
 ```
 
-## Classification levels
 
-| Level | Examples | Expected login impact |
-|-------|----------|-----------------------|
-| **HIGH** | Fed rate decisions, CPI/jobs report, market moves >3%, trading halts | Likely spike within 10–15 min |
-| **MEDIUM** | Earnings beats/misses, IPOs, options expiration, Fed speculation | Possible moderate increase |
-| **LOW** | Analyst upgrades, minor commentary, already-priced-in news | Minimal impact |
 
 ## Tuning
 
@@ -166,7 +252,7 @@ GROUP BY classification, actual_impact;
 
 **Slower machine / want faster classification?** Set `OLLAMA_MODEL=qwen3:8b` in `.env`.
 
-**Want to add a news source?** Append an RSS URL to `RSS_FEEDS` in `core/config.py` — no code changes needed.
+**Want to add a news source?** Use the Feeds page in the UI, or append an RSS URL to `RSS_FEEDS` in `core/config.py`.
 
 ## Project structure
 
@@ -175,19 +261,37 @@ Sentinel/
 ├── core/
 │   ├── monitor.py          Main entry point and polling loop
 │   ├── feeds.py            RSS + NewsAPI fetch and deduplication
+│   ├── feed_handlers.py    Auto-detect RSS/Atom feed types, validate feeds
+│   ├── feeds_manager.py    Manage user-configured feeds stored in SQLite
 │   ├── classifier.py       Ollama HTTP client, classifier, and narrative summarizer
 │   ├── spike_detector.py   Sliding-window burst detection
+│   ├── market_data.py      Global index quotes via yfinance; pre-market volatility detection
 │   ├── storage.py          SQLite + JSON log writer; meta key-value store
 │   ├── alerts.py           Console and Slack alert dispatch
 │   └── config.py           All configuration settings
 ├── api/
-│   ├── main.py             FastAPI application and route handlers
+│   ├── main.py             FastAPI application and route handlers (incl. SPA catch-all)
 │   ├── models.py           Pydantic response schemas
 │   └── dependencies.py     Shared DB connection
 ├── frontend/
 │   ├── src/
-│   │   ├── App.vue         Root component; data fetching and state
-│   │   └── components/     SummaryBar, EventFeed, EventChart, NarrativeSummary, SurgeAlert
+│   │   ├── App.vue         Root component; layout and navigation
+│   │   ├── router.js       Vue Router config (Dashboard, Charts, Feeds pages)
+│   │   ├── main.js         App entry point
+│   │   ├── pages/
+│   │   │   ├── DashboardPage.vue   News feed, summary, narrative, trend chart
+│   │   │   ├── ChartsPage.vue      Sentiment chart and global markets
+│   │   │   └── FeedsPage.vue       RSS feed management UI
+│   │   └── components/
+│   │       ├── SummaryBar.vue
+│   │       ├── EventFeed.vue
+│   │       ├── EventChart.vue
+│   │       ├── NarrativeSummary.vue
+│   │       ├── SurgeAlert.vue
+│   │       ├── SentimentChart.vue
+│   │       ├── GlobalMarkets.vue
+│   │       ├── TimeRangeSelector.vue
+│   │       └── FeedManager.vue
 │   ├── public/favicon.svg
 │   └── package.json
 ├── .github/workflows/
