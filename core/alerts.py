@@ -56,6 +56,15 @@ def alert_article(article: dict, result: dict) -> None:
             "text": f":rotating_light: *HIGH IMPACT NEWS*\n*{title}*\n_{reason}_\nSource: {source}",
         })
 
+    # Discord for HIGH only (when configured)
+    if level == "HIGH" and config.DISCORD_WEBHOOK_URL:
+        _post_discord({
+            "title": "🚨 High Impact News",
+            "description": f"**{title}**\n_{reason}_",
+            "color": _DISCORD_COLORS["HIGH"],
+            "footer": {"text": source},
+        })
+
 
 def alert_surge(count: int, recent_titles: list[str], window_minutes: int) -> None:
     """Print and optionally Slack a NEWS SURGE alert."""
@@ -81,6 +90,18 @@ def alert_surge(count: int, recent_titles: list[str], window_minutes: int) -> No
             )
         })
 
+    if config.DISCORD_WEBHOOK_URL:
+        bullet_list = "\n• ".join(recent_titles[:5])
+        _post_discord({
+            "title": "📢 News Surge Detected",
+            "description": (
+                f"{count} HIGH-impact events in the last {window_minutes} minutes.\n"
+                f"Expect elevated login volume.\n\n"
+                f"**Recent events:**\n• {bullet_list}"
+            ),
+            "color": _DISCORD_COLORS["SURGE"],
+        })
+
 
 def alert_market_signal(signal: dict) -> None:
     """Print a market volatility signal."""
@@ -102,17 +123,47 @@ def alert_market_signal(signal: dict) -> None:
             "text": f":chart_with_downwards_trend: *MARKET VOLATILITY*\n{msg}\nRegion: {region}",
         })
 
+    # Discord for HIGH market signals
+    if level == "HIGH" and config.DISCORD_WEBHOOK_URL:
+        _post_discord({
+            "title": "📉 Market Volatility Signal",
+            "description": f"{direction} {msg}",
+            "color": _DISCORD_COLORS["MARKET"],
+            "footer": {"text": region},
+        })
+
 
 def _post_slack(payload: dict) -> None:
     if not config.SLACK_WEBHOOK_URL:
         return
     try:
-        resp = requests.post(
-            config.SLACK_WEBHOOK_URL,
-            json=payload,
-            timeout=10,
-        )
+        resp = requests.post(config.SLACK_WEBHOOK_URL, json=payload, timeout=10)
         if resp.status_code != 200:
             log.warning("Slack webhook returned %s: %s", resp.status_code, resp.text)
     except Exception as e:
         log.warning("Slack post failed: %s", e)
+
+
+# Discord embed colors
+_DISCORD_COLORS = {
+    "HIGH":   0xe05252,   # red
+    "MEDIUM": 0xe0a832,   # amber
+    "LOW":    0x4a9eda,   # blue
+    "SURGE":  0x9b59b6,   # purple
+    "MARKET": 0xe67e22,   # orange
+}
+
+
+def _post_discord(embed: dict) -> None:
+    if not config.DISCORD_WEBHOOK_URL:
+        return
+    try:
+        resp = requests.post(
+            config.DISCORD_WEBHOOK_URL,
+            json={"embeds": [embed]},
+            timeout=10,
+        )
+        if resp.status_code not in (200, 204):
+            log.warning("Discord webhook returned %s: %s", resp.status_code, resp.text)
+    except Exception as e:
+        log.warning("Discord post failed: %s", e)
