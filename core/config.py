@@ -78,4 +78,7 @@ LOG_PATH = os.getenv("SENTINEL_LOG_PATH", str(_ROOT / "financial_news.log"))
 READ_ONLY = os.getenv("READ_ONLY", "true").strip().lower() not in ("0", "false", "no")
 
 # Alerts — Slack (set webhook URL to enable, leave None to disable)
-SLACK_WEBHOOK_URL = None      # e.g. "https://hooks.slack.com/services/..."
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", None)
+
+# Alerts — Discord (set webhook URL to enable, leave None to disable)
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", None)
