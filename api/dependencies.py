@@ -1,14 +1,15 @@
 """Shared SQLite connection for FastAPI route handlers."""
 
 import sqlite3
-from core import config
-
-_conn: sqlite3.Connection | None = None
+from core import storage
 
 
 def get_db() -> sqlite3.Connection:
-    global _conn
-    if _conn is None:
-        _conn = sqlite3.connect(config.DB_PATH, check_same_thread=False)
-        _conn.row_factory = sqlite3.Row
-    return _conn
+    """Get the properly configured database connection from storage.
+
+    This ensures the API uses the same connection with WAL mode,
+    timeout settings, and synchronous pragmas as the monitor.
+    """
+    conn = storage._get_conn()
+    conn.row_factory = sqlite3.Row
+    return conn
