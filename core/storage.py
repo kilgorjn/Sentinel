@@ -73,7 +73,11 @@ _conn: sqlite3.Connection | None = None
 def _get_conn() -> sqlite3.Connection:
     global _conn
     if _conn is None:
-        _conn = sqlite3.connect(config.DB_PATH, check_same_thread=False)
+        _conn = sqlite3.connect(config.DB_PATH, check_same_thread=False, timeout=10.0)
+        # Enable WAL mode for better concurrency (reader/writer can coexist)
+        _conn.execute("PRAGMA journal_mode=WAL")
+        # Optimize for faster writes
+        _conn.execute("PRAGMA synchronous=NORMAL")
         _conn.executescript(_SCHEMA)
         # Migrate existing databases that predate the sentiment column
         try:
