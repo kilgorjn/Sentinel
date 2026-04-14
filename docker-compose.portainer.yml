@@ -16,7 +16,7 @@ services:
 
   api:
     image: ghcr.io/kilgorjn/sentinel:latest
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 1
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
