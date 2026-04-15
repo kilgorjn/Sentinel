@@ -13,7 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from core import config
-from core.db import NewsEvent as NewsEventModel, Feed as FeedModel, Meta, MarketSnapshot as MarketSnapshotModel
+from core.db import NewsEvent as NewsEventModel, Feed as FeedModel, Meta, MarketSnapshot as MarketSnapshotModel, init_db
 from api.models import (
     NewsEvent, SummaryResponse, ClassificationCount, SentimentBreakdown,
     SurgeResponse, HealthResponse, NarrativeResponse, ConfigResponse,
@@ -23,7 +23,6 @@ from api.models import (
     PredictionResponse,
 )
 from api.dependencies import get_db
-from core.db import init_db
 
 app = FastAPI(title="Sentinel API", version="1.0", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
@@ -610,10 +609,13 @@ if _DIST.exists():
         """Serve static files or fall back to index.html for SPA routing."""
         # Don't intercept API calls
         if path.startswith("api/"):
-            return HTTPException(status_code=404, detail="Not found")
+            raise HTTPException(status_code=404, detail="Not found")
 
         # Try to serve static file first (CSS, JS, images, etc.)
-        file_path = _DIST / path
+        # Resolve and validate the path stays within _DIST to prevent traversal
+        file_path = (_DIST / path).resolve()
+        if not file_path.is_relative_to(_DIST):
+            raise HTTPException(status_code=404, detail="Not found")
         if file_path.is_file():
             return FileResponse(file_path)
 
@@ -621,4 +623,4 @@ if _DIST.exists():
         if _INDEX.exists():
             return FileResponse(_INDEX)
 
-        return HTTPException(status_code=404, detail="Not found")
+        raise HTTPException(status_code=404, detail="Not found")

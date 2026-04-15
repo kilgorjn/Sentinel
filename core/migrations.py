@@ -5,14 +5,21 @@ existing SQLite database (if present) to MySQL.
 
 Idempotent: a 'sqlite_migration_completed' meta key is set on success,
 preventing re-migration on subsequent restarts.
+
+Atomic: all tables are migrated in a single transaction. If anything fails,
+nothing is committed and the completion flag is not set, so the next startup
+retries cleanly.
 """
 
 import os
 import sqlite3
 import logging
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
+
+from sqlalchemy.exc import IntegrityError
 
 from .db import get_session, NewsEvent, Feed, Meta, MarketSnapshot
 
@@ -21,11 +28,22 @@ log = logging.getLogger(__name__)
 MIGRATION_FLAG = "sqlite_migration_completed"
 
 
+def _safe_dt(value: object, fallback: Optional[datetime] = None) -> Optional[datetime]:
+    """Parse an ISO datetime string safely, returning fallback on failure."""
+    if not value:
+        return fallback
+    try:
+        return datetime.fromisoformat(str(value))
+    except (ValueError, TypeError):
+        return fallback
+
+
 def migrate_from_sqlite() -> bool:
     """Migrate data from SQLite to MySQL if SQLite database exists.
 
-    Idempotent — checks for a completion flag in the meta table before
-    running. Safe to call on every startup.
+    Idempotent  — checks for a completion flag before running.
+    Atomic      — uses a single transaction; nothing commits unless everything
+                  succeeds, so a crash mid-migration leaves MySQL clean for retry.
 
     Returns True if migration completed or was already done, False on failure.
     """
@@ -39,7 +57,7 @@ def migrate_from_sqlite() -> bool:
     finally:
         session.close()
 
-    # Determine SQLite path — prefer explicit env var, fall back to config
+    # Determine SQLite path from env
     sqlite_db_path = os.getenv("SENTINEL_DB_PATH") or os.getenv("SQLITE_DB_PATH")
     if not sqlite_db_path:
         log.info("SENTINEL_DB_PATH not set — skipping SQLite migration")
@@ -54,82 +72,97 @@ def migrate_from_sqlite() -> bool:
 
     session = get_session()
     sqlite_conn = None
+    skipped = 0
+
     try:
         sqlite_conn = sqlite3.connect(str(sqlite_path))
         sqlite_conn.row_factory = sqlite3.Row
 
-        # Migrate news_events
+        # --- news_events ---
         log.info("Migrating news_events...")
         rows = sqlite_conn.execute("SELECT * FROM news_events").fetchall()
-        col_names = [d[0] for d in sqlite_conn.execute("SELECT * FROM news_events LIMIT 0").description]
+        col_names = set(d[0] for d in sqlite_conn.execute(
+            "SELECT * FROM news_events LIMIT 0"
+        ).description)
         migrated = 0
+        now = datetime.now(timezone.utc)
         for row in rows:
+            pub = _safe_dt(row["published_at"], fallback=now)
+            created = _safe_dt(row["created_at"], fallback=now)
+            if pub is None or created is None:
+                log.warning("Skipping event id=%s: unparseable timestamps", row["id"])
+                skipped += 1
+                continue
             try:
-                event = NewsEvent(
+                session.add(NewsEvent(
                     id=row["id"],
                     title=row["title"],
                     source=row["source"],
                     url=row["url"],
-                    published_at=datetime.fromisoformat(row["published_at"]),
+                    published_at=pub,
                     classification=row["classification"],
                     confidence=row["confidence"],
                     reason=row["reason"],
                     sentiment=row["sentiment"],
                     actual_impact=row["actual_impact"] if "actual_impact" in col_names else None,
-                    created_at=datetime.fromisoformat(row["created_at"]),
-                )
-                session.add(event)
+                    created_at=created,
+                ))
                 migrated += 1
             except Exception as e:
-                log.warning("Skipping event row (id=%s): %s", row["id"], e)
-        session.commit()
-        log.info("Migrated %d news_events", migrated)
+                log.warning("Skipping event id=%s: %s", row["id"], e)
+                skipped += 1
+        log.info("Queued %d news_events (%d skipped)", migrated, skipped)
 
-        # Migrate feeds
+        # --- feeds ---
         log.info("Migrating feeds...")
         rows = sqlite_conn.execute("SELECT * FROM feeds").fetchall()
-        migrated = 0
+        migrated = skipped = 0
         for row in rows:
+            added = _safe_dt(row["added_at"], fallback=now)
             try:
                 url = row["url"]
-                feed = Feed(
+                session.add(Feed(
                     id=row["id"],
                     url=url,
                     url_hash=hashlib.sha256(url.encode()).hexdigest(),
                     name=row["name"],
                     feed_type=row["feed_type"],
                     active=bool(row["active"]),
-                    added_at=datetime.fromisoformat(row["added_at"]),
-                )
-                session.add(feed)
+                    added_at=added or now,
+                ))
                 migrated += 1
             except Exception as e:
-                log.warning("Skipping feed row (id=%s): %s", row["id"], e)
-        session.commit()
-        log.info("Migrated %d feeds", migrated)
+                log.warning("Skipping feed id=%s: %s", row["id"], e)
+                skipped += 1
+        log.info("Queued %d feeds (%d skipped)", migrated, skipped)
 
-        # Migrate meta (skip the migration flag key itself)
+        # --- meta ---
         log.info("Migrating meta...")
         rows = sqlite_conn.execute("SELECT * FROM meta").fetchall()
-        migrated = 0
+        migrated = skipped = 0
         for row in rows:
+            if row["key"] == MIGRATION_FLAG:
+                continue
             try:
-                if row["key"] == MIGRATION_FLAG:
-                    continue
                 session.add(Meta(key=row["key"], value=row["value"]))
                 migrated += 1
             except Exception as e:
-                log.warning("Skipping meta row (key=%s): %s", row["key"], e)
-        session.commit()
-        log.info("Migrated %d meta entries", migrated)
+                log.warning("Skipping meta key=%s: %s", row["key"], e)
+                skipped += 1
+        log.info("Queued %d meta entries (%d skipped)", migrated, skipped)
 
-        # Migrate market_snapshots
+        # --- market_snapshots ---
         log.info("Migrating market_snapshots...")
         rows = sqlite_conn.execute("SELECT * FROM market_snapshots").fetchall()
-        migrated = 0
+        migrated = skipped = 0
         for row in rows:
+            fetched = _safe_dt(row["fetched_at"])
+            if not fetched:
+                log.warning("Skipping snapshot id=%s: unparseable fetched_at", row["id"])
+                skipped += 1
+                continue
             try:
-                snapshot = MarketSnapshot(
+                session.add(MarketSnapshot(
                     id=row["id"],
                     symbol=row["symbol"],
                     name=row["name"],
@@ -139,24 +172,23 @@ def migrate_from_sqlite() -> bool:
                     change_pct=row["change_pct"],
                     high=row["high"],
                     low=row["low"],
-                    fetched_at=datetime.fromisoformat(row["fetched_at"]),
-                )
-                session.add(snapshot)
+                    fetched_at=fetched,
+                ))
                 migrated += 1
             except Exception as e:
-                log.warning("Skipping snapshot row (id=%s): %s", row["id"], e)
-        session.commit()
-        log.info("Migrated %d market_snapshots", migrated)
+                log.warning("Skipping snapshot id=%s: %s", row["id"], e)
+                skipped += 1
+        log.info("Queued %d market_snapshots (%d skipped)", migrated, skipped)
 
-        # Set idempotency flag
-        session.add(Meta(key=MIGRATION_FLAG, value=datetime.utcnow().isoformat()))
+        # Set completion flag and commit everything atomically
+        session.add(Meta(key=MIGRATION_FLAG, value=datetime.now(timezone.utc).isoformat()))
         session.commit()
 
         log.info("SQLite migration completed successfully")
         return True
 
     except Exception as e:
-        log.error("Migration failed: %s", e, exc_info=True)
+        log.error("Migration failed — rolling back: %s", e, exc_info=True)
         session.rollback()
         return False
     finally:

@@ -4,7 +4,6 @@ Each request gets a fresh SQLAlchemy session from the connection pool.
 The session is always closed (and rolled back on error) when the request ends.
 """
 
-import sqlite3
 from typing import Generator
 from sqlalchemy.orm import Session
 from core.db import get_session

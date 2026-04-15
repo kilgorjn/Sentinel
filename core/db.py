@@ -2,11 +2,9 @@
 
 import os
 from datetime import datetime, timezone
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Index, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Index
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
-
-from . import config
 
 # Get database URL from environment or construct from config
 DATABASE_URL = os.getenv(

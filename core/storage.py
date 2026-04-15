@@ -9,11 +9,11 @@ forwarder pointed at financial_news.log, sourcetype=financial_news.
 """
 
 import hashlib
-
 import json
 import logging
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 from . import config
 from .db import get_session, NewsEvent, Feed, Meta, MarketSnapshot, init_db
@@ -156,7 +156,7 @@ def load_feeds(active_only: bool = True) -> list[dict]:
 
 
 def add_feed(feed_id: str, url: str, name: str, feed_type: str) -> bool:
-    """Add a new feed to the database. Returns True on success, False on error (e.g., duplicate URL)."""
+    """Add a new feed to the database. Returns True on success, False on duplicate URL."""
     session = get_session()
     try:
         url_hash = hashlib.sha256(url.encode()).hexdigest()
@@ -164,10 +164,14 @@ def add_feed(feed_id: str, url: str, name: str, feed_type: str) -> bool:
         session.add(feed)
         session.commit()
         return True
-    except Exception as e:
-        log.warning("Failed to add feed %s: %s", url, e)
+    except IntegrityError:
+        log.warning("Duplicate feed URL: %s", url)
         session.rollback()
         return False
+    except Exception as e:
+        log.error("Unexpected error adding feed %s: %s", url, e)
+        session.rollback()
+        raise
     finally:
         session.close()
 
@@ -214,19 +218,21 @@ def save_snapshots(snapshots: list[dict]) -> None:
         return
     session = get_session()
     try:
-        for s in snapshots:
-            snapshot = MarketSnapshot(
-                symbol=s["symbol"],
-                name=s.get("name"),
-                region=s.get("region"),
-                price=s.get("price"),
-                prev_close=s.get("prev_close"),
-                change_pct=s.get("change_pct"),
-                high=s.get("high"),
-                low=s.get("low"),
-                fetched_at=datetime.fromisoformat(s["fetched_at"]),
-            )
-            session.add(snapshot)
+        rows = [
+            {
+                "symbol": s["symbol"],
+                "name": s.get("name"),
+                "region": s.get("region"),
+                "price": s.get("price"),
+                "prev_close": s.get("prev_close"),
+                "change_pct": s.get("change_pct"),
+                "high": s.get("high"),
+                "low": s.get("low"),
+                "fetched_at": datetime.fromisoformat(s["fetched_at"]),
+            }
+            for s in snapshots
+        ]
+        session.bulk_insert_mappings(MarketSnapshot, rows)
         session.commit()
     except Exception as e:
         log.error("Market snapshot write failed: %s", e)
