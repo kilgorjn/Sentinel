@@ -140,8 +140,14 @@ def migrate_from_sqlite() -> bool:
         log.info("Migrating meta...")
         rows = sqlite_conn.execute("SELECT * FROM meta").fetchall()
         migrated = skipped = 0
+        # Pre-fetch existing keys so we don't collide with rows the API already wrote
+        existing_meta_keys = {r.key for r in session.query(Meta).all()}
         for row in rows:
             if row["key"] == MIGRATION_FLAG:
+                continue
+            if row["key"] in existing_meta_keys:
+                log.debug("Skipping already-present meta key: %s", row["key"])
+                skipped += 1
                 continue
             try:
                 session.add(Meta(key=row["key"], value=row["value"]))
