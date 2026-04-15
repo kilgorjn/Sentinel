@@ -1,128 +1,63 @@
 """
-Persist classified news events to SQLite and a Splunk-ready JSON log file.
+Persist classified news events to MySQL and a Splunk-ready JSON log file.
 
-SQLite stores the full record for later accuracy analysis:
+MySQL stores the full record for analysis and concurrent access:
   SELECT classification, COUNT(*) FROM news_events GROUP BY classification;
 
 The JSON log (one record per line) can be shipped to Splunk with a universal
 forwarder pointed at financial_news.log, sourcetype=financial_news.
 """
 
+import hashlib
 import json
 import logging
-import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 from . import config
+from .db import get_session, NewsEvent, Feed, Meta, MarketSnapshot, init_db
 
 log = logging.getLogger(__name__)
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS news_events (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    title           TEXT NOT NULL,
-    source          TEXT,
-    url             TEXT,
-    published_at    TEXT,
-    classification  TEXT NOT NULL,
-    confidence      REAL,
-    reason          TEXT,
-    sentiment       TEXT,
-    actual_impact   TEXT,        -- filled in manually after Splunk correlation
-    created_at      TEXT NOT NULL
-);
 
-CREATE INDEX IF NOT EXISTS idx_classification ON news_events(classification);
-CREATE INDEX IF NOT EXISTS idx_created_at     ON news_events(created_at);
-
-CREATE TABLE IF NOT EXISTS feeds (
-    id          TEXT PRIMARY KEY,
-    url         TEXT UNIQUE NOT NULL,
-    name        TEXT NOT NULL,
-    feed_type   TEXT,
-    active      BOOLEAN DEFAULT 1,
-    added_at    TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS meta (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS market_snapshots (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    symbol      TEXT NOT NULL,
-    name        TEXT,
-    region      TEXT,
-    price       REAL,
-    prev_close  REAL,
-    change_pct  REAL,
-    high        REAL,
-    low         REAL,
-    fetched_at  TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_market_symbol ON market_snapshots(symbol);
-CREATE INDEX IF NOT EXISTS idx_market_fetched ON market_snapshots(fetched_at);
-"""
-
-# Keep one connection open for the process lifetime
-_conn: sqlite3.Connection | None = None
-
-
-def _get_conn() -> sqlite3.Connection:
-    global _conn
-    if _conn is None:
-        _conn = sqlite3.connect(config.DB_PATH, check_same_thread=False, timeout=10.0)
-        # Enable WAL mode for better concurrency (reader/writer can coexist)
-        _conn.execute("PRAGMA journal_mode=WAL")
-        # Optimize for faster writes
-        _conn.execute("PRAGMA synchronous=NORMAL")
-        _conn.executescript(_SCHEMA)
-        # Migrate existing databases that predate the sentiment column
-        try:
-            _conn.execute("ALTER TABLE news_events ADD COLUMN sentiment TEXT")
-            _conn.commit()
-        except sqlite3.OperationalError:
-            pass  # Column already exists
-    return _conn
+def initialize():
+    """Initialize database tables."""
+    init_db()
 
 
 def save_event(article: dict, result: dict) -> None:
-    """Write a classified article to SQLite and the JSON log file."""
-    now = datetime.now(timezone.utc).isoformat()
+    """Write a classified article to MySQL and the JSON log file."""
+    now = datetime.now(timezone.utc)
     pub = article.get("published_at")
-    pub_str = pub.isoformat() if isinstance(pub, datetime) else str(pub or now)
+    pub_dt = pub if isinstance(pub, datetime) else datetime.fromisoformat(str(pub)) if pub else now
 
-    # --- SQLite ---
+    session = get_session()
     try:
-        conn = _get_conn()
-        conn.execute(
-            """
-            INSERT INTO news_events
-              (title, source, url, published_at, classification, confidence, reason, sentiment, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                article.get("title", ""),
-                article.get("source", ""),
-                article.get("url", ""),
-                pub_str,
-                result.get("classification", "LOW"),
-                result.get("confidence", 0.0),
-                result.get("reason", ""),
-                result.get("sentiment"),
-                now,
-            ),
+        # --- MySQL ---
+        event = NewsEvent(
+            title=article.get("title", ""),
+            source=article.get("source", ""),
+            url=article.get("url", ""),
+            published_at=pub_dt,
+            classification=result.get("classification", "LOW"),
+            confidence=result.get("confidence", 0.0),
+            reason=result.get("reason", ""),
+            sentiment=result.get("sentiment"),
+            created_at=now,
         )
-        conn.commit()
+        session.add(event)
+        session.commit()
     except Exception as e:
-        log.error("SQLite write failed: %s", e)
+        log.error("MySQL write failed: %s", e)
+        session.rollback()
+    finally:
+        session.close()
 
     # --- JSON log (Splunk-ready) ---
     log_entry = {
-        "timestamp": pub_str,
-        "monitored_at": now,
+        "timestamp": pub_dt.isoformat(),
+        "monitored_at": now.isoformat(),
         "source": article.get("source", ""),
         "title": article.get("title", ""),
         "url": article.get("url", ""),
@@ -140,215 +75,209 @@ def save_event(article: dict, result: dict) -> None:
 
 def get_meta(key: str) -> str | None:
     """Return a value from the meta table, or None if not set."""
+    session = get_session()
     try:
-        row = _get_conn().execute(
-            "SELECT value FROM meta WHERE key = ?", (key,)
-        ).fetchone()
-        return row[0] if row else None
+        row = session.query(Meta).filter(Meta.key == key).first()
+        return row.value if row else None
     except Exception:
         return None
+    finally:
+        session.close()
 
 
 def set_meta(key: str, value: str) -> None:
     """Upsert a value into the meta table."""
+    session = get_session()
     try:
-        conn = _get_conn()
-        conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value)
-        )
-        conn.commit()
+        row = session.query(Meta).filter(Meta.key == key).first()
+        if row:
+            row.value = value
+        else:
+            row = Meta(key=key, value=value)
+            session.add(row)
+        session.commit()
     except Exception as e:
         log.error("Meta write failed: %s", e)
+        session.rollback()
+    finally:
+        session.close()
 
 
 def already_seen(title: str) -> bool:
     """Return True if this title was stored in the last 24 hours (avoid re-alerting)."""
+    session = get_session()
     try:
-        conn = _get_conn()
-        row = conn.execute(
-            """
-            SELECT 1 FROM news_events
-            WHERE title = ?
-              AND created_at >= datetime('now', '-24 hours')
-            LIMIT 1
-            """,
-            (title,),
-        ).fetchone()
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        row = session.query(NewsEvent).filter(
+            NewsEvent.title == title,
+            NewsEvent.created_at >= cutoff,
+        ).first()
         return row is not None
     except Exception:
         return False
+    finally:
+        session.close()
 
 
 def summary() -> list[dict]:
     """Return classification counts for console reporting."""
+    session = get_session()
     try:
-        conn = _get_conn()
-        rows = conn.execute(
-            """
-            SELECT classification, COUNT(*) as cnt
-            FROM news_events
-            WHERE created_at >= datetime('now', '-24 hours')
-            GROUP BY classification
-            ORDER BY cnt DESC
-            """
-        ).fetchall()
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        rows = session.query(
+            NewsEvent.classification,
+            func.count(NewsEvent.id).label("cnt"),
+        ).filter(
+            NewsEvent.created_at >= cutoff
+        ).group_by(NewsEvent.classification).all()
+
         return [{"classification": r[0], "count": r[1]} for r in rows]
     except Exception as e:
         log.error("Summary query failed: %s", e)
         return []
+    finally:
+        session.close()
 
 
 def load_feeds(active_only: bool = True) -> list[dict]:
     """Load feeds from database. If active_only=True, return only active feeds."""
+    session = get_session()
     try:
-        conn = _get_conn()
+        query = session.query(Feed)
         if active_only:
-            rows = conn.execute("SELECT id, url, name, feed_type, active, added_at FROM feeds WHERE active = 1").fetchall()
-        else:
-            rows = conn.execute("SELECT id, url, name, feed_type, active, added_at FROM feeds").fetchall()
-        return [
-            {
-                "id": r[0],
-                "url": r[1],
-                "name": r[2],
-                "feed_type": r[3],
-                "active": bool(r[4]),
-                "added_at": r[5],
-            }
-            for r in rows
-        ]
+            query = query.filter(Feed.active.is_(True))
+        rows = query.all()
+        return [r.to_dict() for r in rows]
     except Exception as e:
         log.error("Failed to load feeds: %s", e)
         return []
+    finally:
+        session.close()
 
 
 def add_feed(feed_id: str, url: str, name: str, feed_type: str) -> bool:
-    """Add a new feed to the database. Returns True on success, False on error (e.g., duplicate URL)."""
+    """Add a new feed to the database. Returns True on success, False on duplicate URL."""
+    session = get_session()
     try:
-        conn = _get_conn()
-        now = datetime.now(timezone.utc).isoformat()
-        conn.execute(
-            """
-            INSERT INTO feeds (id, url, name, feed_type, active, added_at)
-            VALUES (?, ?, ?, ?, 1, ?)
-            """,
-            (feed_id, url, name, feed_type, now),
-        )
-        conn.commit()
+        url_hash = hashlib.sha256(url.encode()).hexdigest()
+        feed = Feed(id=feed_id, url=url, url_hash=url_hash, name=name, feed_type=feed_type)
+        session.add(feed)
+        session.commit()
         return True
-    except sqlite3.IntegrityError:
-        # Duplicate URL
+    except IntegrityError:
         log.warning("Duplicate feed URL: %s", url)
+        session.rollback()
         return False
     except Exception as e:
-        log.error("Failed to add feed: %s", e)
-        return False
+        log.error("Unexpected error adding feed %s: %s", url, e)
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 def delete_feed(feed_id: str) -> bool:
     """Delete a feed by ID. Returns True if deleted, False if not found."""
+    session = get_session()
     try:
-        conn = _get_conn()
-        cursor = conn.execute("DELETE FROM feeds WHERE id = ?", (feed_id,))
-        conn.commit()
-        return cursor.rowcount > 0
+        feed = session.query(Feed).filter(Feed.id == feed_id).first()
+        if feed:
+            session.delete(feed)
+            session.commit()
+            return True
+        return False
     except Exception as e:
         log.error("Failed to delete feed: %s", e)
+        session.rollback()
         return False
+    finally:
+        session.close()
+
+
+def toggle_feed(feed_id: str, active: bool) -> dict | None:
+    """Toggle a feed's active status. Returns the updated feed dict or None if not found."""
+    session = get_session()
+    try:
+        feed = session.query(Feed).filter(Feed.id == feed_id).first()
+        if feed:
+            feed.active = active
+            session.commit()
+            return feed.to_dict()
+        return None
+    except Exception as e:
+        log.error("Failed to toggle feed: %s", e)
+        session.rollback()
+        return None
+    finally:
+        session.close()
 
 
 def save_snapshots(snapshots: list[dict]) -> None:
     """Bulk insert market data snapshots."""
     if not snapshots:
         return
+    session = get_session()
     try:
-        conn = _get_conn()
-        conn.executemany(
-            """
-            INSERT INTO market_snapshots
-              (symbol, name, region, price, prev_close, change_pct, high, low, fetched_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    s["symbol"],
-                    s.get("name", ""),
-                    s.get("region", ""),
-                    s.get("price"),
-                    s.get("prev_close"),
-                    s.get("change_pct"),
-                    s.get("high"),
-                    s.get("low"),
-                    s["fetched_at"],
-                )
-                for s in snapshots
-            ],
-        )
-        conn.commit()
+        rows = [
+            {
+                "symbol": s["symbol"],
+                "name": s.get("name"),
+                "region": s.get("region"),
+                "price": s.get("price"),
+                "prev_close": s.get("prev_close"),
+                "change_pct": s.get("change_pct"),
+                "high": s.get("high"),
+                "low": s.get("low"),
+                "fetched_at": datetime.fromisoformat(s["fetched_at"]),
+            }
+            for s in snapshots
+        ]
+        session.bulk_insert_mappings(MarketSnapshot, rows)
+        session.commit()
     except Exception as e:
         log.error("Market snapshot write failed: %s", e)
+        session.rollback()
+    finally:
+        session.close()
 
 
 def get_latest_market_data() -> list[dict]:
     """Return the most recent snapshot per symbol."""
+    session = get_session()
     try:
-        conn = _get_conn()
-        rows = conn.execute(
-            """
-            SELECT * FROM market_snapshots
-            WHERE fetched_at = (
-                SELECT MAX(fetched_at) FROM market_snapshots AS ms2
-                WHERE ms2.symbol = market_snapshots.symbol
-            )
-            ORDER BY region, name
-            """
-        ).fetchall()
-        cols = [desc[0] for desc in conn.execute("SELECT * FROM market_snapshots LIMIT 0").description]
-        return [dict(zip(cols, row)) for row in rows]
+        # Subquery to get max fetched_at per symbol
+        max_fetched = session.query(
+            MarketSnapshot.symbol,
+            func.max(MarketSnapshot.fetched_at).label("max_fetched"),
+        ).group_by(MarketSnapshot.symbol).subquery()
+
+        rows = session.query(MarketSnapshot).join(
+            max_fetched,
+            (MarketSnapshot.symbol == max_fetched.c.symbol) &
+            (MarketSnapshot.fetched_at == max_fetched.c.max_fetched),
+        ).order_by(MarketSnapshot.region, MarketSnapshot.name).all()
+
+        return [r.to_dict() for r in rows]
     except Exception as e:
         log.error("Latest market data query failed: %s", e)
         return []
+    finally:
+        session.close()
 
 
 def get_market_history(symbol: str, hours: int = 24) -> list[dict]:
     """Return snapshots for a symbol over the last N hours (for charting)."""
+    session = get_session()
     try:
-        conn = _get_conn()
-        rows = conn.execute(
-            """
-            SELECT * FROM market_snapshots
-            WHERE symbol = ?
-              AND fetched_at >= datetime('now', ? || ' hours')
-            ORDER BY fetched_at ASC
-            """,
-            (symbol, str(-hours)),
-        ).fetchall()
-        cols = [desc[0] for desc in conn.execute("SELECT * FROM market_snapshots LIMIT 0").description]
-        return [dict(zip(cols, row)) for row in rows]
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        rows = session.query(MarketSnapshot).filter(
+            MarketSnapshot.symbol == symbol,
+            MarketSnapshot.fetched_at >= cutoff,
+        ).order_by(MarketSnapshot.fetched_at).all()
+
+        return [r.to_dict() for r in rows]
     except Exception as e:
         log.error("Market history query failed: %s", e)
         return []
-
-
-def toggle_feed(feed_id: str, active: bool) -> dict | None:
-    """Toggle a feed's active status. Returns the updated feed dict or None if not found."""
-    try:
-        conn = _get_conn()
-        conn.execute("UPDATE feeds SET active = ? WHERE id = ?", (active, feed_id))
-        conn.commit()
-
-        # Fetch and return the updated feed
-        row = conn.execute("SELECT id, url, name, feed_type, active, added_at FROM feeds WHERE id = ?", (feed_id,)).fetchone()
-        if row:
-            return {
-                "id": row[0],
-                "url": row[1],
-                "name": row[2],
-                "feed_type": row[3],
-                "active": bool(row[4]),
-                "added_at": row[5],
-            }
-        return None
-    except Exception as e:
-        log.error("Failed to toggle feed: %s", e)
-        return None
+    finally:
+        session.close()

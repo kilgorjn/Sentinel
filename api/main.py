@@ -5,12 +5,15 @@ from pathlib import Path
 from typing import Optional
 
 import requests
-from fastapi import FastAPI, APIRouter, Query, HTTPException
+from fastapi import FastAPI, APIRouter, Query, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from core import config
+from core.db import NewsEvent as NewsEventModel, Feed as FeedModel, Meta, MarketSnapshot as MarketSnapshotModel, init_db
 from api.models import (
     NewsEvent, SummaryResponse, ClassificationCount, SentimentBreakdown,
     SurgeResponse, HealthResponse, NarrativeResponse, ConfigResponse,
@@ -22,6 +25,12 @@ from api.models import (
 from api.dependencies import get_db
 
 app = FastAPI(title="Sentinel API", version="1.0", docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+
+@app.on_event("startup")
+def on_startup():
+    """Ensure MySQL tables exist before serving any requests."""
+    init_db()
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,26 +51,22 @@ router = APIRouter(prefix="/api")
 
 @router.get("/events", response_model=list[NewsEvent])
 def get_events(
+    session: Session = Depends(get_db),
     classification: Optional[str] = Query(None, description="Filter: HIGH, MEDIUM, or LOW"),
     limit: int = Query(50, le=500),
     offset: int = Query(0),
 ):
-    """Return recent classified events from SQLite, newest-first."""
-    conn = get_db()
+    """Return recent classified events from MySQL, newest-first."""
+    query = session.query(NewsEventModel)
+
     if classification:
         classification = classification.upper()
         if classification not in ("HIGH", "MEDIUM", "LOW"):
             raise HTTPException(status_code=400, detail="classification must be HIGH, MEDIUM, or LOW")
-        rows = conn.execute(
-            "SELECT * FROM news_events WHERE classification = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (classification, limit, offset),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM news_events ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        ).fetchall()
-    return [dict(r) for r in rows]
+        query = query.filter(NewsEventModel.classification == classification)
+
+    rows = query.order_by(NewsEventModel.created_at.desc()).limit(limit).offset(offset).all()
+    return [NewsEvent(**row.to_dict()) for row in rows]
 
 
 _CLS_WEIGHT   = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
@@ -70,30 +75,30 @@ _SENT_THRESH  = 0.10   # score must exceed ±10% to be called directional
 
 
 @router.get("/events/summary", response_model=SummaryResponse)
-def get_summary(hours: int = Query(24, ge=1, le=720)):
+def get_summary(
+    session: Session = Depends(get_db),
+    hours: int = Query(24, ge=1, le=720),
+):
     """Classification counts with per-tier sentiment breakdown and weighted overall sentiment."""
-    conn = get_db()
-    rows = conn.execute(
-        f"""
-        SELECT classification, COALESCE(sentiment, 'NEUTRAL') AS sentiment, COUNT(*) AS cnt
-        FROM news_events
-        WHERE created_at >= datetime('now', '-{hours} hours')
-        GROUP BY classification, sentiment
-        """
-    ).fetchall()
-
-    # Roll up into per-classification buckets
     from collections import defaultdict
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    rows = session.query(
+        NewsEventModel.classification,
+        func.coalesce(NewsEventModel.sentiment, "NEUTRAL").label("sentiment"),
+        func.count(NewsEventModel.id).label("cnt"),
+    ).filter(
+        NewsEventModel.created_at >= cutoff
+    ).group_by(NewsEventModel.classification, NewsEventModel.sentiment).all()
+
     buckets: dict = defaultdict(lambda: {"positive": 0, "negative": 0, "neutral": 0, "total": 0})
     weighted_score = 0.0
     weighted_total = 0.0
 
-    for row in rows:
-        cls  = row["classification"]
-        sent = (row["sentiment"] or "NEUTRAL").upper()
-        cnt  = row["cnt"]
-        key  = sent.lower() if sent in ("POSITIVE", "NEGATIVE") else "neutral"
-        buckets[cls][key]    += cnt
+    for cls, sent, cnt in rows:
+        sent = (sent or "NEUTRAL").upper()
+        key = sent.lower() if sent in ("POSITIVE", "NEGATIVE") else "neutral"
+        buckets[cls][key] += cnt
         buckets[cls]["total"] += cnt
         w = _CLS_WEIGHT.get(cls, 1)
         weighted_score += w * _SENT_SCORE.get(sent, 0) * cnt
@@ -130,15 +135,14 @@ def get_summary(hours: int = Query(24, ge=1, le=720)):
 
 
 @router.get("/surge", response_model=SurgeResponse)
-def get_surge():
+def get_surge(session: Session = Depends(get_db)):
     """Current surge status based on HIGH events in the spike detection window."""
-    conn = get_db()
-    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=config.SPIKE_WINDOW_MINUTES)).isoformat()
-    row = conn.execute(
-        "SELECT COUNT(*) as cnt FROM news_events WHERE classification = 'HIGH' AND published_at >= ?",
-        (cutoff,),
-    ).fetchone()
-    high_count = row["cnt"] if row else 0
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=config.SPIKE_WINDOW_MINUTES)
+    high_count = session.query(func.count(NewsEventModel.id)).filter(
+        NewsEventModel.classification == "HIGH",
+        NewsEventModel.published_at >= cutoff,
+    ).scalar() or 0
+
     return SurgeResponse(
         surge_active=high_count >= config.SPIKE_HIGH_THRESHOLD,
         high_count_in_window=high_count,
@@ -151,11 +155,10 @@ PREDICTION_TTL_SECONDS = 60  # Recompute at most once per minute
 
 
 @router.get("/prediction", response_model=PredictionResponse)
-def get_prediction():
+def get_prediction(session: Session = Depends(get_db)):
     """Composite brokerage login volume prediction derived from news, market, and sentiment signals."""
     from core import predictor, storage as cs
-
-    conn = get_db()
+    import json
 
     # Check cache — inputs change slowly, no need to recompute every request
     cached_result  = cs.get_meta("prediction_result")
@@ -163,7 +166,6 @@ def get_prediction():
     if cached_result and cached_at:
         age = (datetime.now(timezone.utc) - datetime.fromisoformat(cached_at)).total_seconds()
         if age < PREDICTION_TTL_SECONDS:
-            import json
             data = json.loads(cached_result)
             data["computed_at"] = cached_at
             # tooltip is always derived from the level — never stored in cache
@@ -171,31 +173,32 @@ def get_prediction():
             return PredictionResponse(**data)
 
     # --- Surge / HIGH count in window ---------------------------------------
-    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=config.SPIKE_WINDOW_MINUTES)).isoformat()
-    row = conn.execute(
-        "SELECT COUNT(*) FROM news_events WHERE classification = 'HIGH' AND published_at >= ?",
-        (cutoff,),
-    ).fetchone()
-    high_count = row[0] if row else 0
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=config.SPIKE_WINDOW_MINUTES)
+    high_count = session.query(func.count(NewsEventModel.id)).filter(
+        NewsEventModel.classification == "HIGH",
+        NewsEventModel.published_at >= cutoff,
+    ).scalar() or 0
     surge_active = high_count >= config.SPIKE_HIGH_THRESHOLD
 
     # --- MEDIUM count in window ---------------------------------------------
-    row = conn.execute(
-        "SELECT COUNT(*) FROM news_events WHERE classification = 'MEDIUM' AND published_at >= ?",
-        (cutoff,),
-    ).fetchone()
-    medium_count = row[0] if row else 0
+    medium_count = session.query(func.count(NewsEventModel.id)).filter(
+        NewsEventModel.classification == "MEDIUM",
+        NewsEventModel.published_at >= cutoff,
+    ).scalar() or 0
 
     # --- Overall sentiment score (last 24 h) --------------------------------
     sentiment_score = 0.0
     weights = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
     sent_scores = {"POSITIVE": 1, "NEGATIVE": -1, "NEUTRAL": 0}
-    rows = conn.execute(
-        "SELECT classification, sentiment FROM news_events WHERE created_at >= datetime('now', '-24 hours')"
-    ).fetchall()
-    total_weight = sum(weights.get(r[0], 1) for r in rows)
+
+    cutoff_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+    rows = session.query(NewsEventModel.classification, NewsEventModel.sentiment).filter(
+        NewsEventModel.created_at >= cutoff_24h
+    ).all()
+
+    total_weight = sum(weights.get(r.classification, 1) for r in rows)
     if total_weight:
-        weighted_sum = sum(weights.get(r[0], 1) * sent_scores.get(r[1], 0) for r in rows)
+        weighted_sum = sum(weights.get(r.classification, 1) * sent_scores.get(r.sentiment or "NEUTRAL", 0) for r in rows)
         sentiment_score = round(weighted_sum / total_weight, 3)
 
     # --- Market volatility signals ------------------------------------------
@@ -221,7 +224,6 @@ def get_prediction():
     now_str = datetime.now(timezone.utc).isoformat()
 
     # Cache result — tooltip is excluded (always derived from level at read time)
-    import json
     cs.set_meta("prediction_result", json.dumps({k: v for k, v in result.items() if k != "tooltip"}))
     cs.set_meta("prediction_computed_at", now_str)
 
@@ -245,32 +247,33 @@ def get_health():
 
 
 @router.get("/events/timeseries", response_model=TimeseriesResponse)
-def get_timeseries(hours: int = Query(24, ge=1, le=720)):
+def get_timeseries(
+    session: Session = Depends(get_db),
+    hours: int = Query(24, ge=1, le=720),
+):
     """Hourly event counts per classification for the last N hours."""
-    conn = get_db()
+    from sqlalchemy import func
 
     # Build a complete list of hour buckets (UTC, with Z suffix so the browser parses them correctly)
     now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     buckets = [(now - timedelta(hours=i)).strftime("%Y-%m-%dT%H:00:00Z") for i in range(hours - 1, -1, -1)]
 
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    rows = conn.execute(
-        """
-        SELECT strftime('%Y-%m-%dT%H:00:00', published_at) AS bucket,
-               classification,
-               COUNT(*) AS cnt
-        FROM news_events
-        WHERE published_at >= ?
-        GROUP BY bucket, classification
-        ORDER BY bucket ASC
-        """,
-        (cutoff,),
-    ).fetchall()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-    # Index results by (bucket, classification); SQL returns without Z so we add it for matching
+    # Query events grouped by hour and classification
+    rows = session.query(
+        func.date_format(NewsEventModel.published_at, '%Y-%m-%dT%H:00:00').label("bucket"),
+        NewsEventModel.classification,
+        func.count(NewsEventModel.id).label("cnt"),
+    ).filter(
+        NewsEventModel.published_at >= cutoff
+    ).group_by("bucket", NewsEventModel.classification).order_by("bucket").all()
+
+    # Index results by (bucket, classification)
     data: dict[tuple[str, str], int] = {}
-    for row in rows:
-        data[(row[0] + "Z", row[1])] = row[2]
+    for bucket, classification, cnt in rows:
+        # Add Z suffix for matching
+        data[(bucket + "Z", classification)] = cnt
 
     high   = [data.get((b, "HIGH"),   0) for b in buckets]
     medium = [data.get((b, "MEDIUM"), 0) for b in buckets]
@@ -280,39 +283,37 @@ def get_timeseries(hours: int = Query(24, ge=1, le=720)):
 
 
 @router.get("/events/sentiment-timeseries", response_model=SentimentTimeseriesResponse)
-def get_sentiment_timeseries(hours: int = Query(24, ge=1, le=720)):
+def get_sentiment_timeseries(
+    session: Session = Depends(get_db),
+    hours: int = Query(24, ge=1, le=720),
+):
     """Hourly weighted sentiment scores for the last N hours."""
     from collections import defaultdict
-    conn = get_db()
+    from sqlalchemy import func
 
     now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     buckets = [(now - timedelta(hours=i)).strftime("%Y-%m-%dT%H:00:00Z") for i in range(hours - 1, -1, -1)]
 
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    rows = conn.execute(
-        """
-        SELECT strftime('%Y-%m-%dT%H:00:00', published_at) AS bucket,
-               classification,
-               COALESCE(sentiment, 'NEUTRAL') AS sentiment,
-               COUNT(*) AS cnt
-        FROM news_events
-        WHERE published_at >= ?
-        GROUP BY bucket, classification, sentiment
-        ORDER BY bucket ASC
-        """,
-        (cutoff,),
-    ).fetchall()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    rows = session.query(
+        func.date_format(NewsEventModel.published_at, '%Y-%m-%dT%H:00:00').label("bucket"),
+        NewsEventModel.classification,
+        func.coalesce(NewsEventModel.sentiment, "NEUTRAL").label("sentiment"),
+        func.count(NewsEventModel.id).label("cnt"),
+    ).filter(
+        NewsEventModel.published_at >= cutoff
+    ).group_by("bucket", NewsEventModel.classification, NewsEventModel.sentiment).order_by("bucket").all()
 
     bucket_weighted: dict = defaultdict(float)
     bucket_total: dict = defaultdict(float)
-    for row in rows:
-        bucket_key = row[0] + "Z"
-        cls  = row[1]
-        sent = (row[2] or "NEUTRAL").upper()
-        cnt  = row[3]
+
+    for bucket, cls, sent, cnt in rows:
+        bucket_key = bucket + "Z"
+        sent = (sent or "NEUTRAL").upper()
         w = _CLS_WEIGHT.get(cls, 1)
         bucket_weighted[bucket_key] += w * _SENT_SCORE.get(sent, 0) * cnt
-        bucket_total[bucket_key]    += w * cnt
+        bucket_total[bucket_key] += w * cnt
 
     scores = [
         round(bucket_weighted[b] / bucket_total[b], 3) if bucket_total[b] > 0 else None
@@ -331,23 +332,23 @@ NARRATIVE_TTL_SECONDS = 900  # Regenerate at most every 15 minutes
 
 
 @router.get("/events/narrative", response_model=NarrativeResponse)
-def get_narrative():
+def get_narrative(session: Session = Depends(get_db)):
     """AI-generated narrative summary of recent events, with surge-aware context."""
     from core import classifier, storage as cs
-    conn = get_db()
+    from sqlalchemy import func, case
 
     # Current 24h event count and surge state (mirrors /surge logic)
-    count_row = conn.execute(
-        "SELECT COUNT(*) FROM news_events WHERE created_at >= datetime('now', '-24 hours')"
-    ).fetchone()
-    current_count = str(count_row[0]) if count_row else "0"
+    cutoff_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+    current_count = str(session.query(func.count(NewsEventModel.id)).filter(
+        NewsEventModel.created_at >= cutoff_24h
+    ).scalar() or 0)
 
-    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=config.SPIKE_WINDOW_MINUTES)).isoformat()
-    surge_row = conn.execute(
-        "SELECT COUNT(*) FROM news_events WHERE classification = 'HIGH' AND published_at >= ?",
-        (cutoff,),
-    ).fetchone()
-    surge_active = (surge_row[0] if surge_row else 0) >= config.SPIKE_HIGH_THRESHOLD
+    cutoff_spike = datetime.now(timezone.utc) - timedelta(minutes=config.SPIKE_WINDOW_MINUTES)
+    high_count = session.query(func.count(NewsEventModel.id)).filter(
+        NewsEventModel.classification == "HIGH",
+        NewsEventModel.published_at >= cutoff_spike,
+    ).scalar() or 0
+    surge_active = high_count >= config.SPIKE_HIGH_THRESHOLD
 
     # Check cache — skip Ollama if nothing has changed and cache is fresh
     cached_text  = cs.get_meta("narrative_text")
@@ -368,14 +369,20 @@ def get_narrative():
         )
 
     # Fetch events for summarization — HIGH first, then MEDIUM, cap at 25
-    rows = conn.execute(
-        """SELECT title, classification, reason FROM news_events
-           WHERE created_at >= datetime('now', '-24 hours')
-           ORDER BY CASE classification WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END,
-                    created_at DESC
-           LIMIT 25"""
-    ).fetchall()
-    events = [{"title": r[0], "classification": r[1], "reason": r[2]} for r in rows]
+    classification_order = case(
+        (NewsEventModel.classification == "HIGH", 1),
+        (NewsEventModel.classification == "MEDIUM", 2),
+        else_=3,
+    )
+    rows = session.query(
+        NewsEventModel.title,
+        NewsEventModel.classification,
+        NewsEventModel.reason,
+    ).filter(
+        NewsEventModel.created_at >= cutoff_24h
+    ).order_by(classification_order, NewsEventModel.created_at.desc()).limit(25).all()
+
+    events = [{"title": r.title, "classification": r.classification, "reason": r.reason} for r in rows]
 
     # Fetch latest market snapshots for LLM context
     market_ctx = None
@@ -602,10 +609,13 @@ if _DIST.exists():
         """Serve static files or fall back to index.html for SPA routing."""
         # Don't intercept API calls
         if path.startswith("api/"):
-            return HTTPException(status_code=404, detail="Not found")
+            raise HTTPException(status_code=404, detail="Not found")
 
         # Try to serve static file first (CSS, JS, images, etc.)
-        file_path = _DIST / path
+        # Resolve and validate the path stays within _DIST to prevent traversal
+        file_path = (_DIST / path).resolve()
+        if not file_path.is_relative_to(_DIST):
+            raise HTTPException(status_code=404, detail="Not found")
         if file_path.is_file():
             return FileResponse(file_path)
 
@@ -613,4 +623,4 @@ if _DIST.exists():
         if _INDEX.exists():
             return FileResponse(_INDEX)
 
-        return HTTPException(status_code=404, detail="Not found")
+        raise HTTPException(status_code=404, detail="Not found")

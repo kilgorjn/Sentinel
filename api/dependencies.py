@@ -1,15 +1,30 @@
-"""Shared SQLite connection for FastAPI route handlers."""
+"""Database dependencies for FastAPI route handlers.
 
-import sqlite3
-from core import storage
+Each request gets a fresh SQLAlchemy session from the connection pool.
+The session is always closed (and rolled back on error) when the request ends.
+"""
+
+from typing import Generator
+from sqlalchemy.orm import Session
+from core.db import get_session
 
 
-def get_db() -> sqlite3.Connection:
-    """Get the properly configured database connection from storage.
+def get_db() -> Generator[Session, None, None]:
+    """Yield a database session for a route handler.
 
-    This ensures the API uses the same connection with WAL mode,
-    timeout settings, and synchronous pragmas as the monitor.
+    Ensures the session is closed after every request, returning the
+    connection back to the pool. Rolls back on unhandled exceptions.
+
+    Usage:
+        @router.get("/endpoint")
+        def my_route(session: Session = Depends(get_db)):
+            events = session.query(NewsEvent).all()
     """
-    conn = storage._get_conn()
-    conn.row_factory = sqlite3.Row
-    return conn
+    session = get_session()
+    try:
+        yield session
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
