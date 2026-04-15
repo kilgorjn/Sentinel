@@ -145,7 +145,7 @@ def load_feeds(active_only: bool = True) -> list[dict]:
     try:
         query = session.query(Feed)
         if active_only:
-            query = query.filter(Feed.active == True)
+            query = query.filter(Feed.active.is_(True))
         rows = query.all()
         return [r.to_dict() for r in rows]
     except Exception as e:

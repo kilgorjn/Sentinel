@@ -203,7 +203,9 @@ def main() -> None:
 
     # Initialize database and run migrations
     storage.initialize()
-    migrations.migrate_from_sqlite()
+    if not migrations.migrate_from_sqlite():
+        log.error("SQLite migration failed — aborting startup.")
+        sys.exit(1)
 
     if args.test:
         run_test_mode()

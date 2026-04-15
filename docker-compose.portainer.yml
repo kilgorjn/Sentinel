@@ -13,7 +13,7 @@ services:
       - "3306:3306"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -26,6 +26,7 @@ services:
     environment:
       - DATABASE_URL=mysql+pymysql://sentinel:${MYSQL_PASSWORD:-sentinel}@mysql:3306/sentinel
       - SENTINEL_LOG_PATH=/data/financial_news.log
+      - SENTINEL_DB_PATH=/data/news_events.db
       - OLLAMA_URL=${OLLAMA_URL}
       - OLLAMA_MODEL=${OLLAMA_MODEL}
       - NEWSAPI_KEY=${NEWSAPI_KEY}
@@ -45,6 +46,7 @@ services:
     environment:
       - DATABASE_URL=mysql+pymysql://sentinel:${MYSQL_PASSWORD:-sentinel}@mysql:3306/sentinel
       - SENTINEL_LOG_PATH=/data/financial_news.log
+      - SENTINEL_DB_PATH=/data/news_events.db
       - OLLAMA_URL=${OLLAMA_URL}
       - OLLAMA_MODEL=${OLLAMA_MODEL}
       - DISPLAY_TIMEZONE=${DISPLAY_TIMEZONE}

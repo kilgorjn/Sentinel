@@ -1,21 +1,31 @@
 """Database dependencies for FastAPI route handlers.
 
-All routes automatically get a database session with connection pooling.
-SQLAlchemy's connection pool handles concurrent access thread-safely.
+Each request gets a fresh SQLAlchemy session from the connection pool.
+The session is always closed (and rolled back on error) when the request ends.
 """
 
+import sqlite3
+from typing import Generator
+from sqlalchemy.orm import Session
 from core.db import get_session
 
 
-def get_db():
-    """Get a database session for a route handler.
+def get_db() -> Generator[Session, None, None]:
+    """Yield a database session for a route handler.
 
-    Returns a SQLAlchemy session with automatic connection pooling.
-    The connection pool manages cleanup automatically.
+    Ensures the session is closed after every request, returning the
+    connection back to the pool. Rolls back on unhandled exceptions.
 
     Usage:
         @router.get("/endpoint")
-        def my_route(session = Depends(get_db)):
+        def my_route(session: Session = Depends(get_db)):
             events = session.query(NewsEvent).all()
     """
-    return get_session()
+    session = get_session()
+    try:
+        yield session
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

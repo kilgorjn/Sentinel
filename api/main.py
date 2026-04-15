@@ -23,8 +23,15 @@ from api.models import (
     PredictionResponse,
 )
 from api.dependencies import get_db
+from core.db import init_db
 
 app = FastAPI(title="Sentinel API", version="1.0", docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+
+@app.on_event("startup")
+def on_startup():
+    """Ensure MySQL tables exist before serving any requests."""
+    init_db()
 
 app.add_middleware(
     CORSMiddleware,
