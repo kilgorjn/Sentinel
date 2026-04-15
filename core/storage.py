@@ -12,11 +12,13 @@ import hashlib
 import json
 import logging
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 from sqlalchemy import func
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.exc import IntegrityError
 
 from . import config
-from .db import get_session, NewsEvent, Feed, Meta, MarketSnapshot, init_db
+from .db import get_session, RawArticle, NewsEvent, Feed, Meta, MarketSnapshot, init_db
 
 log = logging.getLogger(__name__)
 
@@ -26,13 +28,18 @@ def initialize():
     init_db()
 
 
-def save_event(article: dict, result: dict) -> None:
-    """Write a classified article to MySQL and the JSON log file."""
+def save_event(article: dict, result: dict) -> bool:
+    """Write a classified article to MySQL and the JSON log file.
+
+    Returns True if the MySQL write succeeded, False on failure.
+    The JSON log write is best-effort and does not affect the return value.
+    """
     now = datetime.now(timezone.utc)
     pub = article.get("published_at")
     pub_dt = pub if isinstance(pub, datetime) else datetime.fromisoformat(str(pub)) if pub else now
 
     session = get_session()
+    db_ok = False
     try:
         # --- MySQL ---
         event = NewsEvent(
@@ -48,6 +55,7 @@ def save_event(article: dict, result: dict) -> None:
         )
         session.add(event)
         session.commit()
+        db_ok = True
     except Exception as e:
         log.error("MySQL write failed: %s", e)
         session.rollback()
@@ -72,8 +80,10 @@ def save_event(article: dict, result: dict) -> None:
     except Exception as e:
         log.error("Log file write failed: %s", e)
 
+    return db_ok
 
-def get_meta(key: str) -> str | None:
+
+def get_meta(key: str) -> Optional[str]:
     """Return a value from the meta table, or None if not set."""
     session = get_session()
     try:
@@ -281,3 +291,86 @@ def get_market_history(symbol: str, hours: int = 24) -> list[dict]:
         return []
     finally:
         session.close()
+
+
+# ---------------------------------------------------------------------------
+# Raw article pipeline
+# ---------------------------------------------------------------------------
+
+def save_raw_articles(articles: list[dict]) -> int:
+    """Insert raw fetched articles, skipping duplicates. Returns count inserted.
+
+    Uses MySQL INSERT IGNORE so duplicate title_hash rows are silently skipped
+    without rolling back successfully inserted rows in the same batch.
+    """
+    if not articles:
+        return 0
+    now = datetime.now(timezone.utc)
+    rows = []
+    for article in articles:
+        title = article.get("title", "").strip()
+        if not title:
+            continue
+        pub = article.get("published_at")
+        pub_dt = pub if isinstance(pub, datetime) else (
+            datetime.fromisoformat(str(pub)) if pub else now
+        )
+        rows.append({
+            "title_hash": hashlib.sha256(title.lower().encode()).hexdigest(),
+            "title": title,
+            "source": article.get("source", ""),
+            "url": article.get("url", ""),
+            "summary": article.get("summary", ""),
+            "published_at": pub_dt,
+            "fetched_at": now,
+        })
+    if not rows:
+        return 0
+    session = get_session()
+    try:
+        stmt = mysql_insert(RawArticle).prefix_with("IGNORE").values(rows)
+        result = session.execute(stmt)
+        session.commit()
+        return result.rowcount
+    except Exception as e:
+        log.error("Raw article batch write failed: %s", e)
+        session.rollback()
+        return 0
+    finally:
+        session.close()
+
+
+CURSOR_KEY = "monitor_last_processed_id"
+
+
+def get_unclassified_articles(batch_size: int = 50) -> list[dict]:
+    """Return up to batch_size raw articles not yet processed by the monitor.
+
+    Uses an ID-based cursor stored in meta.monitor_last_processed_id. Ordering
+    by id (auto-increment) is unambiguous — no timestamp collision issues.
+    """
+    cursor_str = get_meta(CURSOR_KEY)
+    last_id = 0
+    if cursor_str:
+        try:
+            last_id = int(cursor_str)
+        except (ValueError, TypeError):
+            log.warning("Invalid cursor value '%s' — resetting to 0", cursor_str)
+            set_meta(CURSOR_KEY, "0")
+
+    session = get_session()
+    try:
+        rows = session.query(RawArticle).filter(
+            RawArticle.id > last_id
+        ).order_by(RawArticle.id).limit(batch_size).all()
+        return [r.to_dict() for r in rows]
+    except Exception as e:
+        log.error("Unclassified articles query failed: %s", e)
+        return []
+    finally:
+        session.close()
+
+
+def advance_cursor(article_id: int) -> None:
+    """Advance the classification cursor to the id of the last processed article."""
+    set_meta(CURSOR_KEY, str(article_id))

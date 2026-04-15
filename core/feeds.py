@@ -128,15 +128,17 @@ def fetch_newsapi() -> list[dict]:
         return []
 
 
-def fetch_all() -> list[dict]:
-    """Fetch from all sources, deduplicate, filter stale, return sorted newest-first."""
+def fetch_all() -> int:
+    """Fetch from all sources, filter stale, persist to raw_articles. Returns count saved.
+
+    Deduplication is handled at the database level via the title_hash UNIQUE constraint
+    in raw_articles — no need to track seen hashes in memory across poll cycles.
+    """
     articles = fetch_rss() + fetch_newsapi()
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=config.MAX_ARTICLE_AGE_HOURS)
 
-    # Deduplicate by normalized title fingerprint and drop articles older than MAX_ARTICLE_AGE_HOURS
-    seen: set[str] = set()
-    unique = []
+    fresh = []
     stale = 0
     for a in articles:
         if not a["title"]:
@@ -144,12 +146,11 @@ def fetch_all() -> list[dict]:
         if a["published_at"] < cutoff:
             stale += 1
             continue
-        key = _normalize_title(a["title"])
-        fp = hashlib.md5(key.encode()).hexdigest()
-        if fp not in seen:
-            seen.add(fp)
-            unique.append(a)
+        fresh.append(a)
 
-    unique.sort(key=lambda x: x["published_at"], reverse=True)
-    log.info("Fetched %d unique articles from %d total (%d stale discarded)", len(unique), len(articles), stale)
-    return unique
+    saved = storage.save_raw_articles(fresh)
+    log.info(
+        "Fetched %d articles from %d total (%d stale discarded, %d new saved to raw_articles)",
+        len(fresh), len(articles), stale, saved,
+    )
+    return saved
