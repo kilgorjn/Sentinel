@@ -1,15 +1,21 @@
-"""Shared SQLite connection for FastAPI route handlers."""
+"""Database dependencies for FastAPI route handlers.
 
-import sqlite3
-from core import storage
+All routes automatically get a database session with connection pooling.
+SQLAlchemy's connection pool handles concurrent access thread-safely.
+"""
+
+from core.db import get_session
 
 
-def get_db() -> sqlite3.Connection:
-    """Get the properly configured database connection from storage.
+def get_db():
+    """Get a database session for a route handler.
 
-    This ensures the API uses the same connection with WAL mode,
-    timeout settings, and synchronous pragmas as the monitor.
+    Returns a SQLAlchemy session with automatic connection pooling.
+    The connection pool manages cleanup automatically.
+
+    Usage:
+        @router.get("/endpoint")
+        def my_route(session = Depends(get_db)):
+            events = session.query(NewsEvent).all()
     """
-    conn = storage._get_conn()
-    conn.row_factory = sqlite3.Row
-    return conn
+    return get_session()

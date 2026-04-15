@@ -1,17 +1,38 @@
 services:
 
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: sentinel
+      MYSQL_USER: sentinel
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-sentinel}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   monitor:
     image: ghcr.io/kilgorjn/sentinel:latest
     command: python -m core.monitor
     volumes:
       - sentinel-data:/data
     environment:
-      - SENTINEL_DB_PATH=/data/news_events.db
+      - DATABASE_URL=mysql+pymysql://sentinel:${MYSQL_PASSWORD:-sentinel}@mysql:3306/sentinel
       - SENTINEL_LOG_PATH=/data/financial_news.log
       - OLLAMA_URL=${OLLAMA_URL}
       - OLLAMA_MODEL=${OLLAMA_MODEL}
       - NEWSAPI_KEY=${NEWSAPI_KEY}
       - DISPLAY_TIMEZONE=${DISPLAY_TIMEZONE}
+    depends_on:
+      mysql:
+        condition: service_healthy
     restart: unless-stopped
 
   api:
@@ -22,13 +43,18 @@ services:
     volumes:
       - sentinel-data:/data
     environment:
-      - SENTINEL_DB_PATH=/data/news_events.db
+      - DATABASE_URL=mysql+pymysql://sentinel:${MYSQL_PASSWORD:-sentinel}@mysql:3306/sentinel
       - SENTINEL_LOG_PATH=/data/financial_news.log
       - OLLAMA_URL=${OLLAMA_URL}
       - OLLAMA_MODEL=${OLLAMA_MODEL}
       - DISPLAY_TIMEZONE=${DISPLAY_TIMEZONE}
+    depends_on:
+      mysql:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
+  mysql-data:
+    external: false
   sentinel-data:
     external: false

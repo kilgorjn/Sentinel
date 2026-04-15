@@ -17,6 +17,7 @@ from . import classifier
 from . import spike_detector
 from . import storage
 from . import alerts
+from . import migrations
 
 logging.basicConfig(
     level=logging.INFO,
@@ -199,6 +200,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Financial news monitor with Ollama classification")
     parser.add_argument("--test", action="store_true", help="Classify sample articles and exit")
     args = parser.parse_args()
+
+    # Initialize database and run migrations
+    storage.initialize()
+    migrations.migrate_from_sqlite()
 
     if args.test:
         run_test_mode()
