@@ -11,6 +11,7 @@ forwarder pointed at financial_news.log, sourcetype=financial_news.
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from sqlalchemy import func
@@ -21,6 +22,12 @@ from . import config
 from .db import get_session, RawArticle, NewsEvent, Feed, Meta, MarketSnapshot, init_db
 
 log = logging.getLogger(__name__)
+
+
+def _title_hash(title: str) -> str:
+    """SHA256 of a fully-normalized title — used as the dedup key in raw_articles."""
+    normalized = re.sub(r"[^a-z0-9 ]", "", title.lower()).strip()
+    return hashlib.sha256(normalized.encode()).hexdigest()
 
 
 def initialize():
@@ -316,7 +323,7 @@ def save_raw_articles(articles: list[dict]) -> int:
             datetime.fromisoformat(str(pub)) if pub else now
         )
         rows.append({
-            "title_hash": hashlib.sha256(title.lower().encode()).hexdigest(),
+            "title_hash": _title_hash(title),
             "title": title,
             "source": article.get("source", ""),
             "url": article.get("url", ""),

@@ -47,14 +47,20 @@ class RawArticle(Base):
     )
 
     def to_dict(self):
+        """Return a dict for internal pipeline use.
+
+        published_at and fetched_at are returned as datetime objects (not ISO
+        strings) so downstream code (classifier, spike detector, save_event)
+        can use them directly without reparsing.
+        """
         return {
             "id": self.id,
             "title": self.title,
             "source": self.source,
             "url": self.url,
             "summary": self.summary,
-            "published_at": self.published_at.isoformat() if self.published_at else None,
-            "fetched_at": self.fetched_at.isoformat() if self.fetched_at else None,
+            "published_at": self.published_at,
+            "fetched_at": self.fetched_at,
         }
 
 

@@ -1,7 +1,5 @@
 """Fetch and parse financial news from RSS feeds and optionally NewsAPI."""
 
-import re
-import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -11,11 +9,6 @@ import requests
 from . import config, storage
 
 log = logging.getLogger(__name__)
-
-
-def _normalize_title(title: str) -> str:
-    """Lowercase + strip punctuation for deduplication."""
-    return re.sub(r"[^a-z0-9 ]", "", title.lower()).strip()
 
 
 def _parse_time(entry) -> datetime:

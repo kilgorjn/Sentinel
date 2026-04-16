@@ -101,18 +101,21 @@ def classify_pending(detector: spike_detector.SpikeDetector) -> int:
         result = classifier.classify(article)
         level  = result.get("classification", "LOW")
 
-        alerts.alert_article(article, result)
         saved = storage.save_event(article, result)
 
         if not saved:
-            # DB write failed — leave cursor here so this article is retried next cycle
-            log.error("Skipping cursor advance for article id=%s due to save failure", article["id"])
-            continue
+            # DB write failed — stop the batch so a later success cannot advance
+            # the cursor past this article; it will be retried next cycle.
+            log.error("Stopping batch at article id=%s due to save failure — will retry next cycle", article["id"])
+            break
 
         # Advance cursor immediately — if we crash on the next article,
         # this one won't be reprocessed
         storage.advance_cursor(article["id"])
         classified += 1
+
+        # Alert only after successful persistence
+        alerts.alert_article(article, result)
 
         is_new_surge = detector.record(article, level)
         if is_new_surge:
@@ -137,9 +140,17 @@ def run_test_mode() -> None:
 
     detector = spike_detector.SpikeDetector()
 
-    # Save test articles as raw, then classify from raw pipeline
-    storage.save_raw_articles(_TEST_ARTICLES)
-    classified = classify_pending(detector)
+    # Classify test articles directly — bypass the persistent cursor so
+    # test mode is deterministic regardless of prior run state.
+    classified = 0
+    for article in _TEST_ARTICLES:
+        if storage.already_seen(article["title"]):
+            continue
+        result = classifier.classify(article)
+        storage.save_event(article, result)
+        alerts.alert_article(article, result)
+        classified += 1
+        time.sleep(0.5)
     print(f"\nClassified {classified} test articles.")
 
     print("\n--- 24h Summary ---")
