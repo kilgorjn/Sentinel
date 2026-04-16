@@ -92,13 +92,13 @@ class NewsEvent(Base):
             "title": self.title,
             "source": self.source,
             "url": self.url,
-            "published_at": self.published_at.isoformat() if self.published_at else None,
+            "published_at": self.published_at.replace(tzinfo=timezone.utc).isoformat() if self.published_at else None,
             "classification": self.classification,
             "confidence": self.confidence,
             "reason": self.reason,
             "sentiment": self.sentiment,
             "actual_impact": self.actual_impact,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": self.created_at.replace(tzinfo=timezone.utc).isoformat() if self.created_at else None,
         }
 
 
@@ -121,7 +121,7 @@ class Feed(Base):
             "name": self.name,
             "feed_type": self.feed_type,
             "active": self.active,
-            "added_at": self.added_at.isoformat() if self.added_at else None,
+            "added_at": self.added_at.replace(tzinfo=timezone.utc).isoformat() if self.added_at else None,
         }  # Note: url_hash is intentionally excluded (internal field)
 
 
@@ -167,7 +167,7 @@ class MarketSnapshot(Base):
             "change_pct": self.change_pct,
             "high": self.high,
             "low": self.low,
-            "fetched_at": self.fetched_at.isoformat() if self.fetched_at else None,
+            "fetched_at": self.fetched_at.replace(tzinfo=timezone.utc).isoformat() if self.fetched_at else None,
         }
 
 
