@@ -76,13 +76,14 @@ def _is_market_hours() -> bool:
 
 
 def classify_pending(detector: spike_detector.SpikeDetector) -> int:
-    """Classify all raw articles not yet processed by the monitor.
+    """Classify one batch of up to 50 unprocessed raw articles.
 
     Reads from raw_articles using a cursor stored in meta, classifies each
     article via Ollama, writes results to news_events, and advances the cursor
     after each successful classification so a mid-batch crash is recoverable.
+    Call repeatedly each poll cycle to drain a backlog.
 
-    Returns the number of articles classified.
+    Returns the number of articles classified in this batch.
     """
     articles = storage.get_unclassified_articles(batch_size=50)
     if not articles:

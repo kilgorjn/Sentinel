@@ -25,9 +25,14 @@ log = logging.getLogger(__name__)
 
 
 def _title_hash(title: str) -> str:
-    """SHA256 of a fully-normalized title — used as the dedup key in raw_articles."""
+    """SHA256 of a fully-normalized title — used as the dedup key in raw_articles.
+
+    Falls back to hashing the lowercased original if normalization produces an
+    empty string (e.g. titles that are entirely non-ASCII or punctuation), so
+    distinct titles always produce distinct hashes.
+    """
     normalized = re.sub(r"[^a-z0-9 ]", "", title.lower()).strip()
-    return hashlib.sha256(normalized.encode()).hexdigest()
+    return hashlib.sha256((normalized or title.lower()).encode()).hexdigest()
 
 
 def initialize():
@@ -50,13 +55,13 @@ def save_event(article: dict, result: dict) -> bool:
     try:
         # --- MySQL ---
         event = NewsEvent(
-            title=article.get("title", ""),
-            source=article.get("source", ""),
-            url=article.get("url", ""),
+            title=article.get("title", "")[:500],
+            source=article.get("source", "")[:100],
+            url=article.get("url", "")[:1000],
             published_at=pub_dt,
             classification=result.get("classification", "LOW"),
             confidence=result.get("confidence", 0.0),
-            reason=result.get("reason", ""),
+            reason=result.get("reason", "")[:500],
             sentiment=result.get("sentiment"),
             created_at=now,
         )
