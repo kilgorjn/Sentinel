@@ -97,3 +97,101 @@ class TestFetchAllFiltering:
             feeds.fetch_all()
         saved = mock_save.call_args[0][0]
         assert len(saved) == 2
+
+
+class TestParseTime:
+    def test_parses_published_parsed(self):
+        from core.feeds import _parse_time
+        entry = {"published_parsed": (2026, 4, 15, 10, 30, 0, 1, 105, 0)}
+        result = _parse_time(entry)
+        assert result == datetime(2026, 4, 15, 10, 30, 0, tzinfo=timezone.utc)
+
+    def test_falls_back_to_updated_parsed(self):
+        from core.feeds import _parse_time
+        entry = {"published_parsed": None, "updated_parsed": (2026, 3, 1, 8, 0, 0, 0, 60, 0)}
+        result = _parse_time(entry)
+        assert result == datetime(2026, 3, 1, 8, 0, 0, tzinfo=timezone.utc)
+
+    def test_returns_now_when_no_date(self):
+        from core.feeds import _parse_time
+        before = datetime.now(timezone.utc)
+        result = _parse_time({"published_parsed": None, "updated_parsed": None})
+        after = datetime.now(timezone.utc)
+        assert before <= result <= after
+
+    def test_returns_now_on_exception(self):
+        from core.feeds import _parse_time
+        entry = {"published_parsed": "not-a-tuple"}
+        before = datetime.now(timezone.utc)
+        result = _parse_time(entry)
+        after = datetime.now(timezone.utc)
+        assert before <= result <= after
+
+
+class TestFetchRss:
+    def _make_entry(self, title="Test", summary="Summary", link="https://ex.com"):
+        from unittest.mock import MagicMock
+        entry = MagicMock()
+        entry.get = lambda k, d="": {
+            "title": title,
+            "summary": summary,
+            "link": link,
+            "published_parsed": (2026, 4, 15, 10, 0, 0, 1, 105, 0),
+        }.get(k, d)
+        return entry
+
+    def test_returns_articles_from_feed(self):
+        entry = self._make_entry("Market Update")
+        mock_feed = MagicMock()
+        mock_feed.feed = MagicMock()
+        mock_feed.feed.get = lambda k, d="": {"title": "Reuters"}.get(k, d)
+        mock_feed.entries = [entry]
+        with patch("core.feeds.feedparser.parse", return_value=mock_feed), \
+             patch("core.feeds.config.RSS_FEEDS", ["https://fake.rss/feed"]):
+            articles = feeds.fetch_rss()
+        assert len(articles) == 1
+        assert articles[0]["title"] == "Market Update"
+        assert articles[0]["source"] == "Reuters"
+
+    def test_skips_failed_feed_gracefully(self):
+        with patch("core.feeds.feedparser.parse", side_effect=Exception("connection error")), \
+             patch("core.feeds.config.RSS_FEEDS", ["https://bad.rss/feed"]):
+            articles = feeds.fetch_rss()
+        assert articles == []
+
+
+class TestNewsApiRateLimiting:
+    def test_rate_ok_when_no_history(self):
+        from core.feeds import _newsapi_rate_ok
+        with patch("core.feeds.storage.get_meta", return_value=None), \
+             patch("core.feeds.config.NEWSAPI_DAILY_LIMIT", 95):
+            assert _newsapi_rate_ok() is True
+
+    def test_rate_blocked_when_daily_limit_reached(self):
+        from core.feeds import _newsapi_rate_ok
+        def mock_meta(key):
+            if key.startswith("newsapi_count_"):
+                return "95"
+            return None
+        with patch("core.feeds.storage.get_meta", side_effect=mock_meta), \
+             patch("core.feeds.config.NEWSAPI_DAILY_LIMIT", 95):
+            assert _newsapi_rate_ok() is False
+
+    def test_rate_blocked_within_cooldown(self):
+        from core.feeds import _newsapi_rate_ok
+        recent = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        def mock_meta(key):
+            if key.startswith("newsapi_count_"):
+                return "0"
+            if key == "newsapi_last_fetch":
+                return recent
+            return None
+        with patch("core.feeds.storage.get_meta", side_effect=mock_meta), \
+             patch("core.feeds.config.NEWSAPI_DAILY_LIMIT", 95), \
+             patch("core.feeds.config.NEWSAPI_MIN_INTERVAL_SECONDS", 900):
+            assert _newsapi_rate_ok() is False
+
+    def test_fetch_newsapi_skips_when_no_key(self):
+        with patch("core.feeds.config.NEWSAPI_KEY", None):
+            result = feeds.fetch_newsapi()
+        assert result == []

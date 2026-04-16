@@ -165,3 +165,103 @@ class TestMeta:
         storage.set_meta("test_key", "old")
         storage.set_meta("test_key", "new")
         assert storage.get_meta("test_key") == "new"
+
+
+class TestFeedStorage:
+    def test_load_feeds_empty(self):
+        assert storage.load_feeds() == []
+
+    def test_add_and_load_feed(self):
+        ok = storage.add_feed("rss1", "https://feeds.example.com/rss", "Example", "RSS 2.0")
+        assert ok is True
+        feeds = storage.load_feeds()
+        assert len(feeds) == 1
+        assert feeds[0]["url"] == "https://feeds.example.com/rss"
+
+    def test_add_duplicate_url_returns_false(self):
+        storage.add_feed("rss1", "https://feeds.example.com/rss", "Example", "RSS 2.0")
+        ok = storage.add_feed("rss2", "https://feeds.example.com/rss", "Duplicate", "RSS 2.0")
+        assert ok is False
+
+    def test_delete_feed(self):
+        storage.add_feed("del1", "https://del.example.com/rss", "Del Feed", "RSS 2.0")
+        assert storage.delete_feed("del1") is True
+        assert storage.load_feeds() == []
+
+    def test_delete_nonexistent_returns_false(self):
+        assert storage.delete_feed("no-such-id") is False
+
+    def test_toggle_feed_inactive(self):
+        storage.add_feed("tog1", "https://tog.example.com/rss", "Toggle Feed", "RSS 2.0")
+        result = storage.toggle_feed("tog1", False)
+        assert result is not None
+        assert result["active"] is False
+        assert storage.load_feeds(active_only=True) == []
+
+    def test_toggle_feed_active(self):
+        storage.add_feed("tog2", "https://tog2.example.com/rss", "Toggle Feed 2", "RSS 2.0")
+        storage.toggle_feed("tog2", False)
+        result = storage.toggle_feed("tog2", True)
+        assert result["active"] is True
+        assert len(storage.load_feeds(active_only=True)) == 1
+
+    def test_toggle_nonexistent_returns_none(self):
+        assert storage.toggle_feed("no-such-id", True) is None
+
+    def test_load_feeds_active_only_false_returns_all(self):
+        storage.add_feed("a1", "https://active.example.com/rss", "Active", "RSS 2.0")
+        storage.add_feed("a2", "https://inactive.example.com/rss", "Inactive", "RSS 2.0")
+        storage.toggle_feed("a2", False)
+        assert len(storage.load_feeds(active_only=False)) == 2
+
+
+class TestMarketData:
+    def _snapshot(self, symbol="SPX", change_pct=1.0, fetched_offset_seconds=0):
+        from datetime import timedelta
+        fetched_at = datetime.now(timezone.utc) - timedelta(seconds=fetched_offset_seconds)
+        return {
+            "symbol": symbol,
+            "name": f"{symbol} Index",
+            "region": "us",
+            "price": 5000.0,
+            "prev_close": 4950.0,
+            "change_pct": change_pct,
+            "high": 5010.0,
+            "low": 4940.0,
+            "fetched_at": fetched_at.isoformat(),
+        }
+
+    def test_save_and_retrieve_snapshots(self):
+        storage.save_snapshots([self._snapshot("SPX")])
+        results = storage.get_latest_market_data()
+        assert len(results) == 1
+        assert results[0]["symbol"] == "SPX"
+
+    def test_get_latest_returns_most_recent_per_symbol(self):
+        storage.save_snapshots([self._snapshot("SPX", fetched_offset_seconds=60)])
+        storage.save_snapshots([self._snapshot("SPX", change_pct=2.0, fetched_offset_seconds=0)])
+        results = storage.get_latest_market_data()
+        assert len(results) == 1
+        assert results[0]["change_pct"] == 2.0
+
+    def test_save_snapshots_empty_list(self):
+        storage.save_snapshots([])
+        assert storage.get_latest_market_data() == []
+
+    def test_get_market_history_returns_within_window(self):
+        storage.save_snapshots([self._snapshot("NDX")])
+        results = storage.get_market_history("NDX", hours=1)
+        assert len(results) == 1
+
+    def test_get_market_history_excludes_old(self):
+        from datetime import timedelta
+        old_time = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+        snap = self._snapshot("NDX")
+        snap["fetched_at"] = old_time
+        storage.save_snapshots([snap])
+        assert storage.get_market_history("NDX", hours=1) == []
+
+    def test_get_market_history_filters_by_symbol(self):
+        storage.save_snapshots([self._snapshot("SPX"), self._snapshot("NDX")])
+        results = storage.get_market_history("SPX", hours=1)
+        assert all(r["symbol"] == "SPX" for r in results)

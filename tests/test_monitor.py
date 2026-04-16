@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch, call, MagicMock
 
 from core import monitor, spike_detector, storage
+from core.monitor import _is_market_hours
 
 
 def _article(id=1, title="Fed Cuts Rates"):
@@ -141,3 +142,46 @@ class TestClassifyPending:
              patch("time.sleep"):
             monitor.classify_pending(detector)
         mock_surge.assert_called_once()
+
+
+class TestIsMarketHours:
+    def _mock_et(self, weekday: int, hour: int):
+        mock_now = MagicMock()
+        mock_now.weekday.return_value = weekday
+        mock_now.hour = hour
+        return mock_now
+
+    def test_weekday_during_market_hours_returns_true(self):
+        with patch("core.monitor.datetime") as mock_dt:
+            mock_dt.now.return_value = self._mock_et(weekday=1, hour=10)
+            assert _is_market_hours() is True
+
+    def test_weekday_before_open_returns_false(self):
+        with patch("core.monitor.datetime") as mock_dt:
+            mock_dt.now.return_value = self._mock_et(weekday=1, hour=8)
+            assert _is_market_hours() is False
+
+    def test_weekday_after_close_returns_false(self):
+        with patch("core.monitor.datetime") as mock_dt:
+            mock_dt.now.return_value = self._mock_et(weekday=1, hour=17)
+            assert _is_market_hours() is False
+
+    def test_saturday_returns_false(self):
+        with patch("core.monitor.datetime") as mock_dt:
+            mock_dt.now.return_value = self._mock_et(weekday=5, hour=12)
+            assert _is_market_hours() is False
+
+    def test_sunday_returns_false(self):
+        with patch("core.monitor.datetime") as mock_dt:
+            mock_dt.now.return_value = self._mock_et(weekday=6, hour=12)
+            assert _is_market_hours() is False
+
+    def test_friday_during_market_hours_returns_true(self):
+        with patch("core.monitor.datetime") as mock_dt:
+            mock_dt.now.return_value = self._mock_et(weekday=4, hour=15)
+            assert _is_market_hours() is True
+
+    def test_exactly_9am_is_market_hours(self):
+        with patch("core.monitor.datetime") as mock_dt:
+            mock_dt.now.return_value = self._mock_et(weekday=2, hour=9)
+            assert _is_market_hours() is True
