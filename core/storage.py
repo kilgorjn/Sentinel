@@ -16,6 +16,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 
 from . import config
@@ -27,11 +28,13 @@ log = logging.getLogger(__name__)
 def _title_hash(title: str) -> str:
     """SHA256 of a fully-normalized title — used as the dedup key in raw_articles.
 
-    Falls back to hashing the lowercased original if normalization produces an
-    empty string (e.g. titles that are entirely non-ASCII or punctuation), so
-    distinct titles always produce distinct hashes.
+    Normalization: lowercase, strip non-alphanumeric (except spaces), collapse
+    repeated whitespace. Falls back to hashing the lowercased original if
+    normalization produces an empty string (e.g. entirely non-ASCII or
+    punctuation titles), so distinct titles always produce distinct hashes.
     """
-    normalized = re.sub(r"[^a-z0-9 ]", "", title.lower()).strip()
+    stripped = re.sub(r"[^a-z0-9 ]", "", title.lower())
+    normalized = " ".join(stripped.split())
     return hashlib.sha256((normalized or title.lower()).encode()).hexdigest()
 
 
@@ -340,7 +343,14 @@ def save_raw_articles(articles: list[dict]) -> int:
         return 0
     session = get_session()
     try:
-        stmt = mysql_insert(RawArticle).prefix_with("IGNORE").values(rows)
+        dialect = session.get_bind().dialect.name
+        if dialect == "mysql":
+            stmt = mysql_insert(RawArticle).prefix_with("IGNORE").values(rows)
+        else:
+            # SQLite (tests) — INSERT OR IGNORE via on_conflict_do_nothing
+            stmt = sqlite_insert(RawArticle).on_conflict_do_nothing(
+                index_elements=["title_hash"]
+            ).values(rows)
         result = session.execute(stmt)
         session.commit()
         return result.rowcount
