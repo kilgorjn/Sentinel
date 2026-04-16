@@ -75,26 +75,49 @@ def _is_market_hours() -> bool:
     return 9 <= now_et.hour < 17
 
 
-def process_articles(article_list: list[dict], detector: spike_detector.SpikeDetector) -> None:
-    """Classify each article, store it, alert if needed, update spike detector."""
-    for article in article_list:
+def classify_pending(detector: spike_detector.SpikeDetector) -> int:
+    """Classify one batch of up to 50 unprocessed raw articles.
+
+    Reads from raw_articles using a cursor stored in meta, classifies each
+    article via Ollama, writes results to news_events, and advances the cursor
+    after each successful classification so a mid-batch crash is recoverable.
+    Call repeatedly each poll cycle to drain a backlog.
+
+    Returns the number of articles classified in this batch.
+    """
+    articles = storage.get_unclassified_articles(batch_size=50)
+    if not articles:
+        return 0
+
+    classified = 0
+    for article in articles:
         title = article.get("title", "")
 
-        # Skip if we've already logged this title in the past 24 hours
+        # Skip if already in news_events (safety net for cursor resets)
         if storage.already_seen(title):
             log.debug("Skipping already-seen: %s", title)
+            storage.advance_cursor(article["id"])
             continue
 
         result = classifier.classify(article)
         level  = result.get("classification", "LOW")
 
-        # Print to console
+        saved = storage.save_event(article, result)
+
+        if not saved:
+            # DB write failed — stop the batch so a later success cannot advance
+            # the cursor past this article; it will be retried next cycle.
+            log.error("Stopping batch at article id=%s due to save failure — will retry next cycle", article["id"])
+            break
+
+        # Advance cursor immediately — if we crash on the next article,
+        # this one won't be reprocessed
+        storage.advance_cursor(article["id"])
+        classified += 1
+
+        # Alert only after successful persistence
         alerts.alert_article(article, result)
 
-        # Persist
-        storage.save_event(article, result)
-
-        # Check for surge
         is_new_surge = detector.record(article, level)
         if is_new_surge:
             alerts.alert_surge(
@@ -106,6 +129,8 @@ def process_articles(article_list: list[dict], detector: spike_detector.SpikeDet
         # Small gap between Ollama calls to avoid hammering the GPU
         time.sleep(0.5)
 
+    return classified
+
 
 def run_test_mode() -> None:
     """Classify the built-in sample articles and exit — useful for smoke-testing."""
@@ -115,7 +140,19 @@ def run_test_mode() -> None:
     print("=" * 60 + "\n")
 
     detector = spike_detector.SpikeDetector()
-    process_articles(_TEST_ARTICLES, detector)
+
+    # Classify test articles directly — bypass the persistent cursor so
+    # test mode is deterministic regardless of prior run state.
+    classified = 0
+    for article in _TEST_ARTICLES:
+        if storage.already_seen(article["title"]):
+            continue
+        result = classifier.classify(article)
+        storage.save_event(article, result)
+        alerts.alert_article(article, result)
+        classified += 1
+        time.sleep(0.5)
+    print(f"\nClassified {classified} test articles.")
 
     print("\n--- 24h Summary ---")
     for row in storage.summary():
@@ -166,8 +203,12 @@ def run_monitor() -> None:
                 log.debug("Outside market hours — skipping news fetch")
             else:
                 log.info("--- Fetching news ---")
-                article_list = feeds.fetch_all()
-                process_articles(article_list, detector)
+                feeds.fetch_all()  # saves to raw_articles
+
+            # Classify whatever is pending in raw_articles (regardless of market hours)
+            classified = classify_pending(detector)
+            if classified:
+                log.info("Classified %d new articles", classified)
 
             # Periodic summary
             rows = storage.summary()

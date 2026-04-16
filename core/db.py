@@ -2,7 +2,7 @@
 
 import os
 from datetime import datetime, timezone
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Index
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Index, Text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
 
@@ -26,6 +26,42 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 Base = declarative_base()
+
+
+class RawArticle(Base):
+    """Raw fetched article, persisted before classification."""
+    __tablename__ = "raw_articles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title_hash = Column(String(64), unique=True, nullable=False)  # SHA256 of normalized title — dedup key
+    title = Column(String(500), nullable=False)
+    source = Column(String(100))
+    url = Column(String(1000))
+    summary = Column(Text)
+    published_at = Column(DateTime)
+    fetched_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        Index("idx_raw_fetched_at", "fetched_at"),
+        Index("idx_raw_published_at", "published_at"),
+    )
+
+    def to_dict(self):
+        """Return a dict for internal pipeline use.
+
+        published_at and fetched_at are returned as datetime objects (not ISO
+        strings) so downstream code (classifier, spike detector, save_event)
+        can use them directly without reparsing.
+        """
+        return {
+            "id": self.id,
+            "title": self.title,
+            "source": self.source,
+            "url": self.url,
+            "summary": self.summary,
+            "published_at": self.published_at,
+            "fetched_at": self.fetched_at,
+        }
 
 
 class NewsEvent(Base):
