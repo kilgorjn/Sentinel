@@ -12,6 +12,10 @@ financial_news.log
 frontend/node_modules/
 frontend/dist/
 
+# Test artifacts
+.coverage
+htmlcov/
+
 # Secrets
 .env
 *-backup-*.json
