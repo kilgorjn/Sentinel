@@ -3,10 +3,10 @@ services:
   mysql:
     image: mysql:8.0
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: sentinel
-      MYSQL_USER: sentinel
-      MYSQL_PASSWORD: sentinel
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-sentinel}
+      MYSQL_USER: ${MYSQL_USER:-sentinel}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-sentinel}
     volumes:
       - mysql-data:/var/lib/mysql
     ports:
@@ -24,7 +24,7 @@ services:
     volumes:
       - sentinel-data:/data
     environment:
-      - DATABASE_URL=mysql+pymysql://sentinel:sentinel@mysql:3306/sentinel
+      - DATABASE_URL=mysql+pymysql://${MYSQL_USER:-sentinel}:${MYSQL_PASSWORD:-sentinel}@mysql:3306/${MYSQL_DATABASE:-sentinel}
       - SENTINEL_LOG_PATH=/data/financial_news.log
       - SENTINEL_DB_PATH=/data/news_events.db
       - NEWSAPI_KEY=${NEWSAPI_KEY}
@@ -41,7 +41,7 @@ services:
     volumes:
       - sentinel-data:/data
     environment:
-      - DATABASE_URL=mysql+pymysql://sentinel:sentinel@mysql:3306/sentinel
+      - DATABASE_URL=mysql+pymysql://${MYSQL_USER:-sentinel}:${MYSQL_PASSWORD:-sentinel}@mysql:3306/${MYSQL_DATABASE:-sentinel}
       - SENTINEL_LOG_PATH=/data/financial_news.log
       - SENTINEL_DB_PATH=/data/news_events.db
     depends_on:
