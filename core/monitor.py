@@ -160,6 +160,65 @@ def run_test_mode() -> None:
     print()
 
 
+def _handle_market_data(detector: spike_detector.SpikeDetector) -> None:
+    """Fetch market snapshots and fire alerts for HIGH-severity signals."""
+    if not config.MARKET_DATA_ENABLED:
+        return
+    try:
+        from core import market_data
+        snapshots = market_data.fetch_snapshots()
+        if not snapshots:
+            return
+        storage.save_snapshots(snapshots)
+        for signal in market_data.detect_volatility(snapshots):
+            if signal["severity"] != "HIGH":
+                continue
+            synthetic = {
+                "title": signal["message"],
+                "source": f"Market Data ({signal['region'].title()})",
+                "published_at": datetime.now(timezone.utc),
+            }
+            is_surge = detector.record(synthetic, "HIGH")
+            alerts.alert_market_signal(signal)
+            if is_surge:
+                alerts.alert_surge(
+                    count=detector.current_count(),
+                    recent_titles=detector.recent_events(),
+                    window_minutes=config.SPIKE_WINDOW_MINUTES,
+                )
+    except Exception as e:
+        log.error("Market data fetch failed: %s", e, exc_info=True)
+
+
+def _handle_news_fetch() -> None:
+    """Fetch news feeds if within configured market-hours window."""
+    if config.MARKET_HOURS_ONLY and not _is_market_hours():
+        log.debug("Outside market hours — skipping news fetch")
+        return
+    log.info("--- Fetching news ---")
+    feeds.fetch_all()
+
+
+def _log_summary(detector: spike_detector.SpikeDetector) -> None:
+    """Log the 24-hour classification summary."""
+    rows = storage.summary()
+    counts = {r["classification"]: r["count"] for r in rows}
+    market_msg = ""
+    if config.MARKET_DATA_ENABLED:
+        market_snapshots = storage.get_latest_market_data()
+        if market_snapshots:
+            market_msg = f"  | Market tickers tracked: {len(market_snapshots)}"
+    log.info(
+        "24h totals — HIGH:%d  MEDIUM:%d  LOW:%d  | Surge window: %d/%d%s",
+        counts.get("HIGH", 0),
+        counts.get("MEDIUM", 0),
+        counts.get("LOW", 0),
+        detector.current_count(),
+        config.SPIKE_HIGH_THRESHOLD,
+        market_msg,
+    )
+
+
 def run_monitor() -> None:
     """Main polling loop."""
     log.info("Starting financial news monitor")
@@ -171,62 +230,14 @@ def run_monitor() -> None:
 
     while True:
         try:
-            # Market data — always runs (catches overnight moves)
-            if config.MARKET_DATA_ENABLED:
-                try:
-                    from core import market_data
-                    snapshots = market_data.fetch_snapshots()
-                    if snapshots:
-                        storage.save_snapshots(snapshots)
-                        signals = market_data.detect_volatility(snapshots)
-                        for signal in signals:
-                            if signal["severity"] == "HIGH":
-                                # Create a synthetic article dict so spike_detector can process it
-                                synthetic = {
-                                    "title": signal["message"],
-                                    "source": f"Market Data ({signal['region'].title()})",
-                                    "published_at": datetime.now(timezone.utc),
-                                }
-                                is_surge = detector.record(synthetic, "HIGH")
-                                alerts.alert_market_signal(signal)
-                                if is_surge:
-                                    alerts.alert_surge(
-                                        count=detector.current_count(),
-                                        recent_titles=detector.recent_events(),
-                                        window_minutes=config.SPIKE_WINDOW_MINUTES,
-                                    )
-                except Exception as e:
-                    log.error("Market data fetch failed: %s", e, exc_info=True)
+            _handle_market_data(detector)
+            _handle_news_fetch()
 
-            # News fetch — gated by market hours if configured
-            if config.MARKET_HOURS_ONLY and not _is_market_hours():
-                log.debug("Outside market hours — skipping news fetch")
-            else:
-                log.info("--- Fetching news ---")
-                feeds.fetch_all()  # saves to raw_articles
-
-            # Classify whatever is pending in raw_articles (regardless of market hours)
             classified = classify_pending(detector)
             if classified:
                 log.info("Classified %d new articles", classified)
 
-            # Periodic summary
-            rows = storage.summary()
-            counts = {r["classification"]: r["count"] for r in rows}
-            market_msg = ""
-            if config.MARKET_DATA_ENABLED:
-                market_snapshots = storage.get_latest_market_data()
-                if market_snapshots:
-                    market_msg = f"  | Market tickers tracked: {len(market_snapshots)}"
-            log.info(
-                "24h totals — HIGH:%d  MEDIUM:%d  LOW:%d  | Surge window: %d/%d%s",
-                counts.get("HIGH", 0),
-                counts.get("MEDIUM", 0),
-                counts.get("LOW", 0),
-                detector.current_count(),
-                config.SPIKE_HIGH_THRESHOLD,
-                market_msg,
-            )
+            _log_summary(detector)
 
         except KeyboardInterrupt:
             log.info("Interrupted — shutting down.")

@@ -57,6 +57,30 @@ def _call_ollama(prompt: str) -> str:
     return resp.json().get("response", "").strip()
 
 
+def _parse_classification(line: str) -> str:
+    for level in ("HIGH", "MEDIUM", "LOW"):
+        if level in line:
+            return level
+    return "LOW"
+
+
+def _parse_confidence(line: str) -> float:
+    raw = line.split(":", 1)[-1].strip()
+    try:
+        val = float(raw.rstrip("%"))
+        return val / 100 if val > 1 else val
+    except ValueError:
+        return 0.5
+
+
+def _parse_sentiment(line: str) -> str:
+    upper = line.upper()
+    for s in ("POSITIVE", "NEGATIVE", "NEUTRAL"):
+        if s in upper:
+            return s
+    return "NEUTRAL"
+
+
 def _parse_response(text: str) -> dict:
     """Extract classification, confidence, reason, and sentiment from Ollama output."""
     result = {"classification": "LOW", "confidence": 0.5, "reason": "", "sentiment": "NEUTRAL"}
@@ -64,24 +88,13 @@ def _parse_response(text: str) -> dict:
     for line in text.splitlines():
         line = line.strip()
         if line.startswith("CLASSIFICATION:"):
-            for level in ("HIGH", "MEDIUM", "LOW"):
-                if level in line:
-                    result["classification"] = level
-                    break
+            result["classification"] = _parse_classification(line)
         elif line.startswith("CONFIDENCE:"):
-            raw = line.split(":", 1)[-1].strip()
-            try:
-                val = float(raw.rstrip("%"))
-                result["confidence"] = val / 100 if val > 1 else val
-            except ValueError:
-                pass
+            result["confidence"] = _parse_confidence(line)
         elif line.startswith("REASON:"):
             result["reason"] = line.split(":", 1)[-1].strip()
         elif line.startswith("SENTIMENT:"):
-            for s in ("POSITIVE", "NEGATIVE", "NEUTRAL"):
-                if s in line.upper():
-                    result["sentiment"] = s
-                    break
+            result["sentiment"] = _parse_sentiment(line)
 
     return result
 

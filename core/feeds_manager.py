@@ -9,6 +9,8 @@ from . import storage
 
 log = logging.getLogger(__name__)
 
+_DEFAULT_FEED_TYPE = "RSS 2.0"
+
 # Path to old feeds.json (for migration)
 _FEEDS_JSON = Path(__file__).resolve().parent.parent / "feeds.json"
 
@@ -61,9 +63,9 @@ def _ensure_default_feeds() -> None:
     log.info("No feeds found, creating defaults...")
 
     defaults = [
-        ("cnbc", "https://www.cnbc.com/id/100003114/device/rss/rss.html", "CNBC Top News", "RSS 2.0"),
-        ("marketwatch", "https://feeds.marketwatch.com/marketwatch/topstories/", "MarketWatch", "RSS 2.0"),
-        ("bloomberg", "https://feeds.bloomberg.com/markets/news.rss", "Bloomberg Markets", "RSS 2.0"),
+        ("cnbc", "https://www.cnbc.com/id/100003114/device/rss/rss.html", "CNBC Top News", _DEFAULT_FEED_TYPE),
+        ("marketwatch", "https://feeds.marketwatch.com/marketwatch/topstories/", "MarketWatch", _DEFAULT_FEED_TYPE),
+        ("bloomberg", "https://feeds.bloomberg.com/markets/news.rss", "Bloomberg Markets", _DEFAULT_FEED_TYPE),
     ]
 
     for feed_id, url, name, feed_type in defaults:

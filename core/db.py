@@ -6,10 +6,16 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, D
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
 
-# Get database URL from environment or construct from config
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    f"mysql+pymysql://sentinel:sentinel@localhost:3306/sentinel"
+# Get database URL from environment or construct from individual env vars.
+# Never hard-code credentials — use environment variables.
+DATABASE_URL = os.getenv("DATABASE_URL") or (
+    "mysql+pymysql://{user}:{pwd}@{host}:{port}/{db}".format(
+        user=os.getenv("MYSQL_USER", "sentinel"),
+        pwd=os.getenv("MYSQL_PASSWORD", ""),
+        host=os.getenv("MYSQL_HOST", "localhost"),
+        port=os.getenv("MYSQL_PORT", "3306"),
+        db=os.getenv("MYSQL_DATABASE", "sentinel"),
+    )
 )
 
 # Create engine with connection pooling

@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Annotated, Optional
 
 import requests
 from fastapi import FastAPI, APIRouter, Query, HTTPException, Depends
@@ -48,13 +48,15 @@ app.add_middleware(
 
 router = APIRouter(prefix="/api")
 
+_NOT_FOUND = "Not found"
+
 
 @router.get("/events", response_model=list[NewsEvent])
 def get_events(
-    session: Session = Depends(get_db),
-    classification: Optional[str] = Query(None, description="Filter: HIGH, MEDIUM, or LOW"),
-    limit: int = Query(50, le=500),
-    offset: int = Query(0),
+    session: Annotated[Session, Depends(get_db)],
+    classification: Annotated[Optional[str], Query(description="Filter: HIGH, MEDIUM, or LOW")] = None,
+    limit: Annotated[int, Query(le=500)] = 50,
+    offset: Annotated[int, Query()] = 0,
 ):
     """Return recent classified events from MySQL, newest-first."""
     query = session.query(NewsEventModel)
@@ -76,8 +78,8 @@ _SENT_THRESH  = 0.10   # score must exceed ±10% to be called directional
 
 @router.get("/events/summary", response_model=SummaryResponse)
 def get_summary(
-    session: Session = Depends(get_db),
-    hours: int = Query(24, ge=1, le=720),
+    session: Annotated[Session, Depends(get_db)],
+    hours: Annotated[int, Query(ge=1, le=720)] = 24,
 ):
     """Classification counts with per-tier sentiment breakdown and weighted overall sentiment."""
     from collections import defaultdict
@@ -135,7 +137,7 @@ def get_summary(
 
 
 @router.get("/surge", response_model=SurgeResponse)
-def get_surge(session: Session = Depends(get_db)):
+def get_surge(session: Annotated[Session, Depends(get_db)]):
     """Current surge status based on HIGH events in the spike detection window."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=config.SPIKE_WINDOW_MINUTES)
     high_count = session.query(func.count(NewsEventModel.id)).filter(
@@ -155,7 +157,7 @@ PREDICTION_TTL_SECONDS = 60  # Recompute at most once per minute
 
 
 @router.get("/prediction", response_model=PredictionResponse)
-def get_prediction(session: Session = Depends(get_db)):
+def get_prediction(session: Annotated[Session, Depends(get_db)]):
     """Composite brokerage login volume prediction derived from news, market, and sentiment signals."""
     from core import predictor, storage as cs
     import json
@@ -248,8 +250,8 @@ def get_health():
 
 @router.get("/events/timeseries", response_model=TimeseriesResponse)
 def get_timeseries(
-    session: Session = Depends(get_db),
-    hours: int = Query(24, ge=1, le=720),
+    session: Annotated[Session, Depends(get_db)],
+    hours: Annotated[int, Query(ge=1, le=720)] = 24,
 ):
     """Hourly event counts per classification for the last N hours."""
     from sqlalchemy import func
@@ -284,8 +286,8 @@ def get_timeseries(
 
 @router.get("/events/sentiment-timeseries", response_model=SentimentTimeseriesResponse)
 def get_sentiment_timeseries(
-    session: Session = Depends(get_db),
-    hours: int = Query(24, ge=1, le=720),
+    session: Annotated[Session, Depends(get_db)],
+    hours: Annotated[int, Query(ge=1, le=720)] = 24,
 ):
     """Hourly weighted sentiment scores for the last N hours."""
     from collections import defaultdict
@@ -332,7 +334,7 @@ NARRATIVE_TTL_SECONDS = 900  # Regenerate at most every 15 minutes
 
 
 @router.get("/events/narrative", response_model=NarrativeResponse)
-def get_narrative(session: Session = Depends(get_db)):
+def get_narrative(session: Annotated[Session, Depends(get_db)]):
     """AI-generated narrative summary of recent events, with surge-aware context."""
     from core import classifier, storage as cs
     from sqlalchemy import func, case
@@ -438,8 +440,8 @@ def validate_feed(request: AddFeedRequest):
 
     result = feed_handlers.detect_feed_type(request.url)
 
-    # Convert handler object to None for serialization
-    handler = result.pop("handler")
+    # Remove handler object (not serializable)
+    result.pop("handler", None)
     result["warnings"] = []
 
     if result["valid"] and not (result.get("sample_entries") and
@@ -507,7 +509,7 @@ def delete_feed(feed_id: str):
 
 
 @router.patch("/feeds/{feed_id}")
-def toggle_feed(feed_id: str, active: bool = Query(..., description="Enable or disable feed")):
+def toggle_feed(feed_id: str, active: Annotated[bool, Query(description="Enable or disable feed")]):
     """Enable/disable a feed."""
     _check_read_only()
     from core import feeds_manager
@@ -572,8 +574,8 @@ def get_market_indices():
 
 @router.get("/market/history")
 def get_market_history(
-    symbol: str = Query(..., description="Ticker symbol, e.g. ^N225"),
-    hours: int = Query(24, ge=1, le=720, description="Look-back hours"),
+    symbol: Annotated[str, Query(description="Ticker symbol, e.g. ^N225")],
+    hours: Annotated[int, Query(ge=1, le=720, description="Look-back hours")] = 24,
 ):
     """Historical snapshots for a specific symbol (for charting)."""
     from core import storage as ms
@@ -609,13 +611,13 @@ if _DIST.exists():
         """Serve static files or fall back to index.html for SPA routing."""
         # Don't intercept API calls
         if path.startswith("api/"):
-            raise HTTPException(status_code=404, detail="Not found")
+            raise HTTPException(status_code=404, detail=_NOT_FOUND)
 
         # Try to serve static file first (CSS, JS, images, etc.)
         # Resolve and validate the path stays within _DIST to prevent traversal
         file_path = (_DIST / path).resolve()
         if not file_path.is_relative_to(_DIST):
-            raise HTTPException(status_code=404, detail="Not found")
+            raise HTTPException(status_code=404, detail=_NOT_FOUND)
         if file_path.is_file():
             return FileResponse(file_path)
 
@@ -623,4 +625,4 @@ if _DIST.exists():
         if _INDEX.exists():
             return FileResponse(_INDEX)
 
-        raise HTTPException(status_code=404, detail="Not found")
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
