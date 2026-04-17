@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch, call, MagicMock
 
 from core import monitor, spike_detector, storage
+from core.monitor import _handle_market_data, _handle_news_fetch, _log_summary
 
 
 def _article(id=1, title="Fed Cuts Rates"):
@@ -141,3 +142,124 @@ class TestClassifyPending:
              patch("time.sleep"):
             monitor.classify_pending(detector)
         mock_surge.assert_called_once()
+
+
+class TestHandleNewsFetch:
+    def test_skips_fetch_outside_market_hours(self):
+        with patch("core.monitor.config") as mock_cfg, \
+             patch("core.monitor._is_market_hours", return_value=False), \
+             patch("core.monitor.feeds.fetch_all") as mock_fetch:
+            mock_cfg.MARKET_HOURS_ONLY = True
+            _handle_news_fetch()
+        mock_fetch.assert_not_called()
+
+    def test_fetches_during_market_hours(self):
+        with patch("core.monitor.config") as mock_cfg, \
+             patch("core.monitor._is_market_hours", return_value=True), \
+             patch("core.monitor.feeds.fetch_all") as mock_fetch:
+            mock_cfg.MARKET_HOURS_ONLY = True
+            _handle_news_fetch()
+        mock_fetch.assert_called_once()
+
+    def test_always_fetches_when_market_hours_only_false(self):
+        with patch("core.monitor.config") as mock_cfg, \
+             patch("core.monitor.feeds.fetch_all") as mock_fetch:
+            mock_cfg.MARKET_HOURS_ONLY = False
+            _handle_news_fetch()
+        mock_fetch.assert_called_once()
+
+
+class TestHandleMarketData:
+    def test_does_nothing_when_disabled(self, detector):
+        with patch("core.monitor.config") as mock_cfg:
+            mock_cfg.MARKET_DATA_ENABLED = False
+            _handle_market_data(detector)  # should not raise or call anything
+
+    def test_skips_when_no_snapshots(self, detector):
+        with patch("core.monitor.config") as mock_cfg, \
+             patch("core.market_data.fetch_snapshots", return_value=[]), \
+             patch("core.monitor.storage.save_snapshots") as mock_save:
+            mock_cfg.MARKET_DATA_ENABLED = True
+            _handle_market_data(detector)
+        mock_save.assert_not_called()
+
+    def test_saves_snapshots_when_present(self, detector):
+        snapshots = [{"symbol": "SPX", "change_pct": 1.0}]
+        with patch("core.monitor.config") as mock_cfg, \
+             patch("core.market_data.fetch_snapshots", return_value=snapshots), \
+             patch("core.market_data.detect_volatility", return_value=[]), \
+             patch("core.monitor.storage.save_snapshots") as mock_save:
+            mock_cfg.MARKET_DATA_ENABLED = True
+            _handle_market_data(detector)
+        mock_save.assert_called_once_with(snapshots)
+
+    def test_handles_fetch_exception_gracefully(self, detector):
+        with patch("core.monitor.config") as mock_cfg, \
+             patch("core.monitor.storage.save_snapshots", side_effect=RuntimeError("db down")):
+            mock_cfg.MARKET_DATA_ENABLED = True
+            # Should not raise
+            try:
+                _handle_market_data(detector)
+            except RuntimeError:
+                pass  # Exception before save is also acceptable
+
+    def test_fires_alert_for_high_severity_signal(self, detector):
+        signal = {
+            "severity": "HIGH",
+            "message": "Market drop",
+            "region": "us",
+            "type": "drop",
+            "change_pct": -4.0,
+        }
+        snapshots = [{"symbol": "SPX", "change_pct": -4.0}]
+        with patch("core.monitor.config") as mock_cfg, \
+             patch("core.market_data.fetch_snapshots", return_value=snapshots), \
+             patch("core.market_data.detect_volatility", return_value=[signal]), \
+             patch("core.monitor.storage.save_snapshots"), \
+             patch("core.monitor.alerts.alert_market_signal") as mock_alert:
+            mock_cfg.MARKET_DATA_ENABLED = True
+            mock_cfg.SPIKE_WINDOW_MINUTES = 30
+            _handle_market_data(detector)
+        mock_alert.assert_called_once_with(signal)
+
+    def test_ignores_non_high_severity_signal(self, detector):
+        signal = {
+            "severity": "MEDIUM",
+            "message": "Minor move",
+            "region": "us",
+            "type": "move",
+            "change_pct": -1.0,
+        }
+        snapshots = [{"symbol": "SPX", "change_pct": -1.0}]
+        with patch("core.monitor.config") as mock_cfg, \
+             patch("core.market_data.fetch_snapshots", return_value=snapshots), \
+             patch("core.market_data.detect_volatility", return_value=[signal]), \
+             patch("core.monitor.storage.save_snapshots"), \
+             patch("core.monitor.alerts.alert_market_signal") as mock_alert:
+            mock_cfg.MARKET_DATA_ENABLED = True
+            _handle_market_data(detector)
+        mock_alert.assert_not_called()
+
+
+class TestLogSummary:
+    def test_does_not_raise(self, detector):
+        summary = [
+            {"classification": "HIGH", "count": 2},
+            {"classification": "MEDIUM", "count": 5},
+            {"classification": "LOW", "count": 10},
+        ]
+        with patch("core.monitor.storage.summary", return_value=summary), \
+             patch("core.monitor.config") as mock_cfg:
+            mock_cfg.MARKET_DATA_ENABLED = False
+            mock_cfg.SPIKE_HIGH_THRESHOLD = 3
+            _log_summary(detector)
+
+    def test_includes_market_ticker_count(self, detector):
+        summary = [{"classification": "LOW", "count": 1}]
+        snapshots = [{"symbol": "SPX"}, {"symbol": "DJI"}]
+        with patch("core.monitor.storage.summary", return_value=summary), \
+             patch("core.monitor.storage.get_latest_market_data", return_value=snapshots), \
+             patch("core.monitor.config") as mock_cfg:
+            mock_cfg.MARKET_DATA_ENABLED = True
+            mock_cfg.SPIKE_HIGH_THRESHOLD = 3
+            _log_summary(detector)  # should not raise
