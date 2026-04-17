@@ -17,7 +17,6 @@ from . import classifier
 from . import spike_detector
 from . import storage
 from . import alerts
-from . import migrations
 
 logging.basicConfig(
     level=logging.INFO,
@@ -253,11 +252,7 @@ def main() -> None:
     parser.add_argument("--test", action="store_true", help="Classify sample articles and exit")
     args = parser.parse_args()
 
-    # Initialize database and run migrations
     storage.initialize()
-    if not migrations.migrate_from_sqlite():
-        log.error("SQLite migration failed — aborting startup.")
-        sys.exit(1)
 
     if args.test:
         run_test_mode()
