@@ -311,6 +311,7 @@ class TestIsMarketHours:
 
 class TestRunTestMode:
     def test_classifies_unseen_articles(self):
+        summary = [{"classification": "HIGH", "count": 2}, {"classification": "LOW", "count": 5}]
         with patch("core.monitor.storage.already_seen", return_value=False), \
              patch("core.monitor.classifier.classify", return_value={
                  "classification": "LOW", "confidence": 0.5,
@@ -318,7 +319,7 @@ class TestRunTestMode:
              }), \
              patch("core.monitor.storage.save_event", return_value=True), \
              patch("core.monitor.alerts.alert_article"), \
-             patch("core.monitor.storage.summary", return_value=[]), \
+             patch("core.monitor.storage.summary", return_value=summary), \
              patch("time.sleep"):
             monitor.run_test_mode()  # should not raise
 
@@ -328,6 +329,72 @@ class TestRunTestMode:
              patch("core.monitor.storage.summary", return_value=[]):
             monitor.run_test_mode()
         mock_classify.assert_not_called()
+
+
+class TestRunMonitor:
+    def test_one_iteration_then_keyboard_interrupt(self):
+        """Run one full loop iteration; KeyboardInterrupt from time.sleep exits."""
+        with patch("core.monitor._handle_market_data"), \
+             patch("core.monitor._handle_news_fetch"), \
+             patch("core.monitor.classify_pending", return_value=0), \
+             patch("core.monitor._log_summary"), \
+             patch("core.monitor.config") as mock_cfg, \
+             patch("time.sleep", side_effect=KeyboardInterrupt):
+            mock_cfg.POLL_INTERVAL_SECONDS = 0
+            with pytest.raises(KeyboardInterrupt):
+                monitor.run_monitor()
+
+    def test_keyboard_interrupt_inside_loop_calls_sys_exit(self):
+        """KeyboardInterrupt inside the try block triggers sys.exit(0)."""
+        with patch("core.monitor._handle_market_data", side_effect=KeyboardInterrupt), \
+             patch("core.monitor._handle_news_fetch"), \
+             patch("core.monitor._log_summary"), \
+             patch("core.monitor.config"):
+            with pytest.raises(SystemExit) as exc:
+                monitor.run_monitor()
+            assert exc.value.code == 0
+
+    def test_generic_exception_is_caught_and_loop_continues(self):
+        """An unexpected exception is caught; loop continues until KeyboardInterrupt."""
+        with patch("core.monitor._handle_market_data",
+                   side_effect=[Exception("boom"), KeyboardInterrupt]), \
+             patch("core.monitor._handle_news_fetch"), \
+             patch("core.monitor.classify_pending", return_value=0), \
+             patch("core.monitor._log_summary"), \
+             patch("core.monitor.config") as mock_cfg, \
+             patch("time.sleep"):
+            mock_cfg.POLL_INTERVAL_SECONDS = 0
+            with pytest.raises(SystemExit) as exc:
+                monitor.run_monitor()
+            assert exc.value.code == 0
+
+    def test_classified_count_is_logged(self):
+        """When articles are classified, the count is logged."""
+        with patch("core.monitor._handle_market_data"), \
+             patch("core.monitor._handle_news_fetch"), \
+             patch("core.monitor.classify_pending", return_value=3), \
+             patch("core.monitor._log_summary"), \
+             patch("core.monitor.config") as mock_cfg, \
+             patch("time.sleep", side_effect=KeyboardInterrupt):
+            mock_cfg.POLL_INTERVAL_SECONDS = 0
+            with pytest.raises(KeyboardInterrupt):
+                monitor.run_monitor()
+
+
+class TestMain:
+    def test_main_test_mode(self):
+        with patch("sys.argv", ["monitor", "--test"]), \
+             patch("core.monitor.storage.initialize"), \
+             patch("core.monitor.run_test_mode") as mock_run:
+            monitor.main()
+        mock_run.assert_called_once()
+
+    def test_main_monitor_mode(self):
+        with patch("sys.argv", ["monitor"]), \
+             patch("core.monitor.storage.initialize"), \
+             patch("core.monitor.run_monitor") as mock_run:
+            monitor.main()
+        mock_run.assert_called_once()
 
 
 class TestHandleMarketDataSurge:
