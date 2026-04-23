@@ -1,7 +1,12 @@
-"""Tests for core/db.py — model to_dict() datetime serialization."""
+"""Tests for core/db.py — model to_dict() and schema migration helpers."""
 
 import pytest
 from datetime import datetime, timezone
+from unittest.mock import patch
+
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from core.db import RawArticle, NewsEvent, Feed, MarketSnapshot
 
@@ -52,9 +57,23 @@ class TestNewsEventToDict:
             title="T", published_at=_NOW, classification="LOW", created_at=_NOW
         )
         d = event.to_dict()
-        for key in ("id", "title", "source", "url", "published_at", "classification",
-                    "confidence", "reason", "sentiment", "actual_impact", "created_at"):
+        for key in ("id", "title", "source", "url", "summary", "published_at",
+                    "classification", "confidence", "reason", "sentiment",
+                    "actual_impact", "created_at"):
             assert key in d
+
+    def test_summary_included_in_dict(self):
+        event = NewsEvent(
+            title="T", published_at=_NOW, classification="LOW", created_at=_NOW,
+            summary="RSS feed text here.",
+        )
+        assert event.to_dict()["summary"] == "RSS feed text here."
+
+    def test_summary_none_when_not_set(self):
+        event = NewsEvent(
+            title="T", published_at=_NOW, classification="LOW", created_at=_NOW,
+        )
+        assert event.to_dict()["summary"] is None
 
 
 class TestFeedToDict:
@@ -131,3 +150,63 @@ class TestRawArticleToDict:
         )
         d = article.to_dict()
         assert isinstance(d["fetched_at"], datetime)
+
+
+@pytest.fixture
+def scratch_engine():
+    """Fresh in-memory SQLite engine isolated from the shared test suite engine."""
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    yield engine
+    engine.dispose()
+
+
+class TestMigrateNewsEvents:
+    def test_adds_summary_column_when_missing(self, scratch_engine):
+        """Migration adds summary to an existing news_events table that lacks it."""
+        import core.db as db_module
+
+        engine = scratch_engine
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE news_events ("
+                "id INTEGER PRIMARY KEY, "
+                "title TEXT NOT NULL, "
+                "classification TEXT NOT NULL, "
+                "created_at TEXT NOT NULL"
+                ")"
+            ))
+
+        with patch.object(db_module, "engine", engine):
+            db_module._migrate_news_events()
+
+        cols = {col["name"] for col in inspect(engine).get_columns("news_events")}
+        assert "summary" in cols
+
+    def test_no_op_when_summary_already_present(self, patch_db_engine):
+        """Migration is a no-op and raises no error when summary already exists."""
+        import core.db as db_module
+        db_module._migrate_news_events()  # should not raise
+
+    def test_no_op_when_table_does_not_exist(self, scratch_engine):
+        """Migration returns early without error when news_events doesn't exist."""
+        import core.db as db_module
+
+        with patch.object(db_module, "engine", scratch_engine):
+            db_module._migrate_news_events()  # should not raise
+
+    def test_init_db_creates_tables_and_runs_migration(self, scratch_engine):
+        """init_db() creates all tables and the summary column is present."""
+        import core.db as db_module
+
+        Session = sessionmaker(bind=scratch_engine)
+        with patch.object(db_module, "engine", scratch_engine), \
+             patch.object(db_module, "SessionLocal", Session):
+            db_module.init_db()
+
+        assert inspect(scratch_engine).has_table("news_events")
+        cols = {col["name"] for col in inspect(scratch_engine).get_columns("news_events")}
+        assert "summary" in cols
