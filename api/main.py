@@ -324,19 +324,6 @@ def get_sentiment_timeseries(
     return SentimentTimeseriesResponse(labels=buckets, scores=scores)
 
 
-@router.get("/events/{event_id}", response_model=NewsEventDetail, responses={404: {"description": _NOT_FOUND}})
-def get_event_detail(
-    event_id: int,
-    session: Annotated[Session, Depends(get_db)],
-):
-    """Return full detail for a single event, including the raw RSS summary."""
-    row = session.get(NewsEventModel, event_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail=_NOT_FOUND)
-    data = row.to_dict()
-    return NewsEventDetail(**data)
-
-
 @router.get("/config", response_model=ConfigResponse)
 def get_config():
     """Frontend display settings derived from server config."""
@@ -417,6 +404,19 @@ def get_narrative(session: Annotated[Session, Depends(get_db)]):
     cs.set_meta("narrative_surge_state", str(surge_active))
 
     return NarrativeResponse(text=text, generated_at=now_str, cached=False, surge_active=surge_active)
+
+
+@router.get("/events/{event_id}", response_model=NewsEventDetail, responses={404: {"description": _NOT_FOUND}})
+def get_event_detail(
+    event_id: int,
+    session: Annotated[Session, Depends(get_db)],
+):
+    """Return full detail for a single event, including the raw RSS summary."""
+    row = session.get(NewsEventModel, event_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    data = row.to_dict()
+    return NewsEventDetail(**data)
 
 
 @router.get("/feeds", response_model=list[FeedInfo])
