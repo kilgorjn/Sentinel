@@ -18,6 +18,11 @@ class NewsEvent(BaseModel):
     created_at: str
 
 
+class NewsEventDetail(NewsEvent):
+    """Full event detail including RSS summary — returned by GET /api/events/{id}."""
+    summary: Optional[str] = None
+
+
 class SentimentBreakdown(BaseModel):
     positive: int = 0
     negative: int = 0

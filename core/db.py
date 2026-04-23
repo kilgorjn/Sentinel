@@ -78,6 +78,7 @@ class NewsEvent(Base):
     title = Column(String(500), nullable=False)
     source = Column(String(100))
     url = Column(String(1000))
+    summary = Column(Text)
     published_at = Column(DateTime, nullable=False)
     classification = Column(String(20), nullable=False)  # HIGH, MEDIUM, LOW
     confidence = Column(Float, default=0.0)
@@ -98,6 +99,7 @@ class NewsEvent(Base):
             "title": self.title,
             "source": self.source,
             "url": self.url,
+            "summary": self.summary,
             "published_at": self.published_at.replace(tzinfo=timezone.utc).isoformat() if self.published_at else None,
             "classification": self.classification,
             "confidence": self.confidence,
@@ -178,8 +180,25 @@ class MarketSnapshot(Base):
 
 
 def init_db():
-    """Create all tables."""
+    """Create all tables and apply any pending column migrations."""
     Base.metadata.create_all(bind=engine)
+    _migrate_news_events()
+
+
+def _migrate_news_events():
+    """Add columns to news_events that were introduced after the initial schema.
+
+    Uses inspector rather than ALTER TABLE ... IF NOT EXISTS so it works on
+    both MySQL 5.7 and SQLite (used in tests).
+    """
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    if not inspector.has_table("news_events"):
+        return
+    existing = {col["name"] for col in inspector.get_columns("news_events")}
+    with engine.begin() as conn:
+        if "summary" not in existing:
+            conn.execute(text("ALTER TABLE news_events ADD COLUMN summary TEXT"))
 
 
 def get_session():
