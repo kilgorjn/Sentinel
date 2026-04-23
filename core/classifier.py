@@ -2,6 +2,7 @@
 
 import re
 import logging
+from typing import Optional
 
 import requests
 
@@ -138,7 +139,7 @@ You are a financial news analyst at a large brokerage firm.
 Recent classified news events (last 24 hours):
 {events}
 
-{surge_context}Write 3-4 sentences covering:
+{prediction_context}{surge_context}Write 3-4 sentences covering:
 - The main financial themes driving market attention right now
 - Why brokerage customers are likely logging in to check their accounts
 - Any key risk factors or catalysts to watch
@@ -146,17 +147,29 @@ Recent classified news events (last 24 hours):
 Rules: Output ONLY the summary sentences. No preamble, no intro phrase, no labels. Start directly with the first sentence of analysis.
 SUMMARY:"""
 
+_PREDICTION_TONE = {
+    "NORMAL":   "metrics indicate baseline login activity — acknowledge themes but note conditions are not yet driving elevated traffic",
+    "MODERATE": "metrics indicate moderately elevated login activity — convey developing conditions that merit attention",
+    "ELEVATED": "metrics indicate significantly elevated login activity — convey meaningful concern and heightened customer engagement",
+    "SURGE":    "metrics indicate a login volume SURGE — convey urgency and directly explain what is driving the spike",
+}
+
 
 def summarize(
     events: list[dict],
     surge_active: bool = False,
     market_context: list[dict] | None = None,
+    prediction: Optional[dict] | None = None,
 ) -> str:
     """Generate a plain-English narrative summary of recent events via Ollama.
 
     If *market_context* is provided (a list of snapshot dicts with at least
     ``name`` and ``change_pct`` keys), significant moves are appended to the
     prompt so the LLM can weave them into the narrative.
+
+    If *prediction* is provided (a dict with at least ``label``, ``score``,
+    and ``drivers`` keys), the current login volume prediction is injected so
+    the LLM calibrates its tone to match the quantitative assessment.
     """
     if not events:
         return "No significant financial events in the last 24 hours."
@@ -184,9 +197,24 @@ def summarize(
                 "\n\nGLOBAL MARKET CONTEXT:\n" + "\n".join(market_lines) + "\n"
             )
 
+    # Inject prediction context so the LLM's tone matches the quantitative view
+    prediction_context = ""
+    if prediction:
+        label   = prediction.get("label", "NORMAL")
+        score   = prediction.get("score", 0)
+        drivers = prediction.get("drivers") or []
+        tone    = _PREDICTION_TONE.get(label, _PREDICTION_TONE["NORMAL"])
+        drivers_str = "; ".join(drivers) if drivers else "no significant drivers"
+        prediction_context = (
+            f"CURRENT LOGIN VOLUME PREDICTION: {label} (score: {score}/100)\n"
+            f"Key drivers: {drivers_str}\n"
+            f"Tone guidance: {tone}\n\n"
+        )
+
     prompt = _SUMMARY_PROMPT.format(
         events="\n".join(lines) + market_section,
         surge_context=surge_context,
+        prediction_context=prediction_context,
     )
     try:
         raw = _call_ollama(prompt)
