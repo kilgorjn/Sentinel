@@ -180,8 +180,25 @@ class MarketSnapshot(Base):
 
 
 def init_db():
-    """Create all tables."""
+    """Create all tables and apply any pending column migrations."""
     Base.metadata.create_all(bind=engine)
+    _migrate_news_events()
+
+
+def _migrate_news_events():
+    """Add columns to news_events that were introduced after the initial schema.
+
+    Uses inspector rather than ALTER TABLE ... IF NOT EXISTS so it works on
+    both MySQL 5.7 and SQLite (used in tests).
+    """
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    if not inspector.has_table("news_events"):
+        return
+    existing = {col["name"] for col in inspector.get_columns("news_events")}
+    with engine.begin() as conn:
+        if "summary" not in existing:
+            conn.execute(text("ALTER TABLE news_events ADD COLUMN summary TEXT"))
 
 
 def get_session():
