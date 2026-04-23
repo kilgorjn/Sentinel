@@ -35,8 +35,14 @@ const modalError  = ref(null)
 // Drive native <dialog> open/close from modalOpen
 watch(modalOpen, async (val) => {
   await nextTick()
-  if (val) dialogEl.value?.showModal()
-  else dialogEl.value?.close()
+  if (val) {
+    dialogEl.value?.showModal()
+    // showModal() triggers an internal focus() which scrolls the page.
+    // Immediately re-focus with preventScroll to suppress that scroll.
+    dialogEl.value?.querySelector('.modal-close')?.focus({ preventScroll: true })
+  } else {
+    dialogEl.value?.close()
+  }
 })
 
 async function openModal(ev) {
@@ -199,7 +205,13 @@ small { display: block; color: #555; font-size: 0.78rem; margin-top: 3px; }
   max-height: 80vh;
   overflow-y: auto;
   padding: 24px 28px;
-  position: relative;
+  /* Fixed + transform centers the dialog and gives position: absolute children
+     (the close button) a containing block. Overrides the browser default which
+     would place the dialog at its document-flow position (top-left). */
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   color: #ddd;
 }
 .modal::backdrop {
