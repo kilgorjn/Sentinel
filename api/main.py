@@ -395,7 +395,17 @@ def get_narrative(session: Annotated[Session, Depends(get_db)]):
         except Exception:
             pass
 
-    text = classifier.summarize(events, surge_active=surge_active, market_context=market_ctx)
+    # Pull cached prediction so the LLM can calibrate its tone to match
+    prediction = None
+    try:
+        import json as _json
+        cached_prediction = cs.get_meta("prediction_result")
+        if cached_prediction:
+            prediction = _json.loads(cached_prediction)
+    except Exception:
+        pass
+
+    text = classifier.summarize(events, surge_active=surge_active, market_context=market_ctx, prediction=prediction)
     now_str = datetime.now(timezone.utc).isoformat()
 
     cs.set_meta("narrative_text", text)

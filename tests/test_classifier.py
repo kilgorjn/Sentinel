@@ -219,3 +219,24 @@ class TestSummarize:
         with patch("core.classifier._call_ollama", side_effect=RuntimeError("offline")):
             result = summarize(self._EVENTS)
         assert "unavailable" in result.lower()
+
+    def test_prediction_context_included_in_prompt(self):
+        prediction = {"label": "ELEVATED", "score": 42, "drivers": ["3 HIGH events", "Market volatility"]}
+        captured = {}
+        def capture_prompt(prompt):
+            captured["prompt"] = prompt
+            return "Summary."
+        with patch("core.classifier._call_ollama", side_effect=capture_prompt):
+            summarize(self._EVENTS, prediction=prediction)
+        assert "ELEVATED" in captured["prompt"]
+        assert "42" in captured["prompt"]
+        assert "3 HIGH events" in captured["prompt"]
+
+    def test_no_prediction_context_when_omitted(self):
+        captured = {}
+        def capture_prompt(prompt):
+            captured["prompt"] = prompt
+            return "Summary."
+        with patch("core.classifier._call_ollama", side_effect=capture_prompt):
+            summarize(self._EVENTS)
+        assert "LOGIN VOLUME PREDICTION" not in captured["prompt"]
