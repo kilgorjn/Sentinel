@@ -78,6 +78,7 @@ class NewsEvent(Base):
     title = Column(String(500), nullable=False)
     source = Column(String(100))
     url = Column(String(1000))
+    summary = Column(Text)
     published_at = Column(DateTime, nullable=False)
     classification = Column(String(20), nullable=False)  # HIGH, MEDIUM, LOW
     confidence = Column(Float, default=0.0)
@@ -98,6 +99,7 @@ class NewsEvent(Base):
             "title": self.title,
             "source": self.source,
             "url": self.url,
+            "summary": self.summary,
             "published_at": self.published_at.replace(tzinfo=timezone.utc).isoformat() if self.published_at else None,
             "classification": self.classification,
             "confidence": self.confidence,

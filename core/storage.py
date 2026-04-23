@@ -61,6 +61,7 @@ def save_event(article: dict, result: dict) -> bool:
             title=article.get("title", "")[:500],
             source=article.get("source", "")[:100],
             url=article.get("url", "")[:1000],
+            summary=article.get("summary"),
             published_at=pub_dt,
             classification=result.get("classification", "LOW"),
             confidence=result.get("confidence", 0.0),

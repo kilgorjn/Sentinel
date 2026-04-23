@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 # Point all DB access at in-memory SQLite before importing app modules
 _TEST_DB_URL = "sqlite:///:memory:"
@@ -24,7 +25,14 @@ def patch_db_engine():
     from sqlalchemy.orm import sessionmaker
     import core.db as db_module
 
-    engine = create_engine(_TEST_DB_URL, connect_args={"check_same_thread": False})
+    # StaticPool ensures all threads (including FastAPI's threadpool) share
+    # the same SQLite in-memory connection, so tables created by create_all
+    # are visible to route handlers running in worker threads.
+    engine = create_engine(
+        _TEST_DB_URL,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
     with patch.object(db_module, "engine", engine), \

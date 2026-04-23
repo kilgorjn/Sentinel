@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from core import config
 from core.db import NewsEvent as NewsEventModel, Feed as FeedModel, Meta, MarketSnapshot as MarketSnapshotModel, init_db
 from api.models import (
-    NewsEvent, SummaryResponse, ClassificationCount, SentimentBreakdown,
+    NewsEvent, NewsEventDetail, SummaryResponse, ClassificationCount, SentimentBreakdown,
     SurgeResponse, HealthResponse, NarrativeResponse, ConfigResponse,
     TimeseriesResponse, SentimentTimeseriesResponse,
     FeedInfo, FeedValidationResult, AddFeedRequest, AddFeedResponse,
@@ -322,6 +322,19 @@ def get_sentiment_timeseries(
         for b in buckets
     ]
     return SentimentTimeseriesResponse(labels=buckets, scores=scores)
+
+
+@router.get("/events/{event_id}", response_model=NewsEventDetail, responses={404: {"description": _NOT_FOUND}})
+def get_event_detail(
+    event_id: int,
+    session: Annotated[Session, Depends(get_db)],
+):
+    """Return full detail for a single event, including the raw RSS summary."""
+    row = session.get(NewsEventModel, event_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    data = row.to_dict()
+    return NewsEventDetail(**data)
 
 
 @router.get("/config", response_model=ConfigResponse)
